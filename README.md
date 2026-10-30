@@ -9,6 +9,8 @@ interface. While the Splunk web interface and similar tools are powerful, it's o
 cumbersome to quickly navigate through logs near or around a specific event of
 interest. This tool aims to fix that.
 
+![0x0A Pager](0x0a.png)
+
 ## Features
 
 - Endless, pager-style scrolling through a Splunk index.
