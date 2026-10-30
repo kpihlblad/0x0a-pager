@@ -11,22 +11,14 @@ interest. This tool aims to fix that.
 
 ## Features
 
-- Endless, pager-style scrolling through a Splunk index, loading ahead of you;
-  go to any time with `G`.
-- Search outward from where you are (Ctrl-F or `/`), step through matches with
-  F3 / `n`, and flip to a **Matches view** with only the matching events (F4 or
-  `&`). Narrow or exclude the scope with `+` / `-`.
-- Each row's icon shows who logged it: the background is the machine and
-  process, the shape is the thread, and the spot is the request or trace. Hover
-  the icon for details. `a` (or a click on the icon) narrows to the row's
-  thread, `A` to its request. Right-click a row (or press Shift-F10) for a
-  context menu.
-- Bookmarks (Ctrl-B or `m`, view them with F2, Ctrl-Shift-B or `M`), copy as text, JSON lines,
-  CSV or HTML, and export to a file.
+- Endless, pager-style scrolling through a Splunk index.
+- Search, step through matches and flip to a **Matches view** with only the matching events. Narrow or exclude the
+  scope.
+- Bookmark log entries, copy as text, JSON lines, CSV or HTML, and export to a file.
 - Select across lines to see the time range and duration between the first and
   last selected line in the status bar.
 - A minimap at the right edge shows where the matches and bookmarks are and what
-  part you are looking at; click or drag it to scroll.
+  part you are looking at.
 - Desktop, `less` and Emacs key aliases; press `h` for the key help.
 
 ## Install
@@ -35,11 +27,9 @@ Downloads are on the [releases page](https://github.com/kpihlblad/0x0a-pager/rel
 
 - **Windows:** unzip `0x0a-pager-windows.zip` and run `0x0a-pager\0x0a-pager.exe`.
   It includes its own Java runtime.
-- **Ubuntu and other Linux distributions with snap:** `sudo snap install 0x0a-pager --edge`.
 - **Debian and Ubuntu:** `sudo apt install ./pager-0x0a_<version>_amd64.deb`. It includes its own
   Java runtime and adds a menu entry.
-- **macOS and anything else:** install Java 25 or later (for example
-  [Temurin](https://adoptium.net/)), then run `java -jar 0x0a-pager-<version>.jar`.
+- **Java** install Java 25 or later, then run `java -jar 0x0a-pager-<version>.jar`.
 
 ## Error Prone report
 
@@ -50,8 +40,8 @@ mvn -Perrorprone
 ```
 
 This is shorthand for `mvn -Perrorprone clean test-compile`. It rebuilds and
-analyzes production and test sources without running tests, then writes
-**`target/errorprone.txt`** with source locations, check names, documentation
+analyzes production and test sources without running tests, then writes **`target/errorprone.txt`** with source
+locations, check names, documentation
 links and suggested fixes. Compiler diagnostics go to files rather than the
 console. Normal `mvn compile`, `mvn test` and `mvn package` do not run Error Prone.
 
