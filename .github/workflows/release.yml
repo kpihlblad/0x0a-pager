@@ -1,0 +1,146 @@
+name: Release build
+
+# Runs in the public repo: a pushed v* tag creates the release (if missing) and
+# attaches the jar, the Windows zip, the Linux .deb and the snap, and publishes
+# the snap to the edge channel. Skipped in repos that set the PUBLIC_REPO variable.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # jpackage's default runtime omits modules that export no API, such as locale
+  # data and extra charsets. jdk.crypto.mscapi (Windows certificate store) is
+  # added in the Windows job.
+  JPACKAGE_MODULES: >-
+    java.se,jdk.unsupported,jdk.unsupported.desktop,jdk.accessibility,jdk.zipfs,jdk.charsets,
+    jdk.localedata,jdk.crypto.cryptoki,jdk.net,jdk.naming.dns,jdk.management,jdk.security.auth,
+    jdk.security.jgss,jdk.httpserver,jdk.jfr
+
+jobs:
+  release:
+    if: vars.PUBLIC_REPO == '' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+                 --title "0x0A Pager ${GITHUB_REF_NAME}" --notes ""
+
+  windows:
+    needs: release
+    if: ${{ !cancelled() && vars.PUBLIC_REPO == '' && needs.release.result != 'failure' }}
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build jar
+        run: mvn -B -DskipTests package
+
+      - name: Package app image
+        run: |
+          jar=$(cd target && ls 0x0a-pager-*-jar-with-dependencies.jar)
+          # jpackage needs a numeric version (e.g. v1.2.3 -> 1.2.3)
+          version=$(echo "${GITHUB_REF_NAME}" | grep -oE '[0-9]+(\.[0-9]+){0,2}' | head -n1)
+          mkdir staging
+          cp "target/$jar" staging/
+          modules=$(echo "$JPACKAGE_MODULES" | tr -d ' '),jdk.crypto.mscapi
+          jpackage --type app-image --name 0x0a-pager --app-version "${version:-1.0.0}" \
+            --input staging --main-jar "$jar" --main-class se.grynna.pager.Main \
+            --icon src/main/jpackage/0x0a-pager.ico --add-modules "$modules" --dest dist
+          cd dist && 7z a ../0x0a-pager-windows.zip 0x0a-pager
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" 0x0a-pager-windows.zip --clobber
+
+      - name: Upload artifact (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 0x0a-pager-windows
+          path: dist/0x0a-pager
+
+  linux:
+    needs: release
+    if: ${{ !cancelled() && vars.PUBLIC_REPO == '' && needs.release.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    env:
+      SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Build jar
+        run: mvn -B -DskipTests package
+
+      - name: Package jar, app image and .deb
+        run: |
+          jar=$(cd target && ls 0x0a-pager-*-jar-with-dependencies.jar)
+          version=$(echo "${GITHUB_REF_NAME}" | grep -oE '[0-9]+(\.[0-9]+){0,2}' | head -n1)
+          version=${version:-1.0.0}
+          mkdir staging out
+          cp "target/$jar" staging/
+          cp "target/$jar" "out/0x0a-pager-${version}.jar"
+          jpackage --type app-image --name 0x0a-pager --app-version "$version" \
+            --input staging --main-jar "$jar" --main-class se.grynna.pager.Main \
+            --icon src/main/resources/icons/0x0a-pager-256.png \
+            --add-modules "$(echo "$JPACKAGE_MODULES" | tr -d ' ')" --dest dist
+          # jpackage requires Debian package names to start with a letter.
+          jpackage --type deb --app-image dist/0x0a-pager --name 0x0a-pager \
+            --linux-package-name pager-0x0a --app-version "$version" \
+            --resource-dir src/main/jpackage/linux --linux-shortcut \
+            --linux-app-category devel --linux-menu-group "Development;Utility;" \
+            --linux-deb-maintainer 629043+kpihlblad@users.noreply.github.com \
+            --description "Pager-style log browser for Splunk Enterprise" --vendor "Karl Pihlblad" \
+            --about-url "https://github.com/${GITHUB_REPOSITORY}" --license-file LICENSE --dest out
+          sed -i "s/^version: .*/version: '${version}'/" snap/snapcraft.yaml
+
+      - name: Build snap
+        id: snap
+        uses: snapcore/action-build@v1
+
+      - name: Publish snap to edge
+        if: startsWith(github.ref, 'refs/tags/v') && env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        uses: snapcore/action-publish@v1
+        with:
+          snap: ${{ steps.snap.outputs.snap }}
+          release: edge
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" out/* "${{ steps.snap.outputs.snap }}" --clobber
+
+      - name: Upload artifact (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 0x0a-pager-linux
+          path: |
+            out/*
+            ${{ steps.snap.outputs.snap }}

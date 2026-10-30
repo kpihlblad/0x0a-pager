@@ -1,0 +1,2 @@
+Raven Swing-Toast-Notifications                             https://github.com/DJ-Raven/swing-toast-notifications                        (The Apache Software Licence, Version 2.0)
+Raven Spinner Progress                                      https://github.com/DJ-Raven/spinner-progress                                 (The MIT Licence)

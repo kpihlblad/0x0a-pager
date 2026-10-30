@@ -1,0 +1,52 @@
+# Wraps the jpackage Linux app image (dist/0x0a-pager, built by the release
+# workflow before snapcraft runs). The release workflow sets the version.
+name: 0x0a-pager
+title: 0x0A Pager
+summary: Pager-style log browser for Splunk Enterprise
+description: |
+  0x0A Pager is a desktop log browser for Splunk Enterprise that feels like
+  less: open an index, then scroll, jump to a time and search outward from
+  where you are, with the events loading ahead of you.
+
+  Not affiliated with Splunk LLC. Splunk is a trademark of Splunk LLC.
+version: '0.0.0'
+license: Apache-2.0
+website: https://github.com/kpihlblad/0x0a-pager
+source-code: https://github.com/kpihlblad/0x0a-pager
+issues: https://github.com/kpihlblad/0x0a-pager/issues
+icon: src/main/resources/icons/0x0a-pager-256.png
+base: core24
+grade: stable
+confinement: strict
+
+platforms:
+  amd64:
+
+apps:
+  0x0a-pager:
+    command: bin/0x0a-pager
+    extensions: [gnome]
+    plugs: [home, network]
+    environment:
+      # The home interface denies hidden directories, so data and preferences
+      # live in the snap's per-user directory.
+      XDG_DATA_HOME: $SNAP_USER_DATA/.local/share
+      JAVA_TOOL_OPTIONS: -Djava.util.prefs.userRoot=$SNAP_USER_DATA/.java
+
+parts:
+  0x0a-pager:
+    plugin: dump
+    source: dist/0x0a-pager
+    stage-packages:
+      - libasound2t64
+      - libfreetype6
+      - libgif7
+      - libharfbuzz0b
+      - libjpeg-turbo8
+      - liblcms2-2
+      - libpng16-16t64
+      - libx11-6
+      - libxext6
+      - libxi6
+      - libxrender1
+      - libxtst6
