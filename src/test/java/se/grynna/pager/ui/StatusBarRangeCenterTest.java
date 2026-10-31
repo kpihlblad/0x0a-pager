@@ -505,7 +505,7 @@ class StatusBarRangeCenterTest {
     }
 
     private static String dateMinute(Instant t) {
-        return DateTimeFormatterManagerTestUtil.localDateMinute(t);
+        return DateTimeFormatterManager.formatRangeEndpoint(t, t.plusSeconds(86_400), NOW);
     }
 
     private Color centerColor() {

@@ -362,8 +362,8 @@ class LogViewerNoMatchesExtendTest {
         onEdt(() -> {});
         onEdt(() -> {
             assertThat(statusBar.searchCenterText()).isEqualTo("\u2190 "
-                    + RangeText.endpoint(suggested[0], null, clock.instant(),
-                            se.grynna.pager.ui.preferences.DateTimeFormatterManager.zoneId()));
+                    + se.grynna.pager.ui.preferences.DateTimeFormatterManager.formatRangeEndpoint(suggested[0], null,
+                            clock.instant()));
 
         });
         clock.fastForward(Duration.ofSeconds(11)); // old enough to ask again, not to extend by itself

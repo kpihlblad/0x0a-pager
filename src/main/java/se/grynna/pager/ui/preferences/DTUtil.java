@@ -57,16 +57,26 @@ public class DTUtil {
     }
 
     static DateTimeFormatter createDateTimeFormatter(Locale locale) {
-        FormatStyle dateStyle = FormatStyle.SHORT;
-        FormatStyle timeStyle = FormatStyle.MEDIUM;
-        Chronology chrono = Chronology.ofLocale(locale);
+        return createLocalizedFormatter(locale, FormatStyle.SHORT, FormatStyle.MEDIUM);
+    }
 
+    /** Short date and short time, for absolute range endpoints whose seconds are zero. */
+    static DateTimeFormatter createDateTimeFormatterWithoutSeconds(Locale locale) {
+        return createLocalizedFormatter(locale, FormatStyle.SHORT, FormatStyle.SHORT);
+    }
+
+    /** Medium time without the date, for range endpoints on the first visible line's date. */
+    static DateTimeFormatter createTimeFormatter(Locale locale) {
+        return createLocalizedFormatter(locale, null, FormatStyle.MEDIUM);
+    }
+
+    private static DateTimeFormatter createLocalizedFormatter(Locale locale, FormatStyle dateStyle,
+            FormatStyle timeStyle) {
+        Chronology chrono = Chronology.ofLocale(locale);
         String pat = DateTimeFormatterBuilder.getLocalizedDateTimePattern(dateStyle, timeStyle, chrono, locale);
 
         // replace narrow no-break space with regular space for compatibility
         pat = pat.replace("\u202F", " ");
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pat, locale);
-        return formatter;
+        return DateTimeFormatter.ofPattern(pat, locale);
     }
 }

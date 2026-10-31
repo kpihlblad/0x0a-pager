@@ -1190,7 +1190,7 @@ public class StatusBar extends JPanel {
         if (searchActive) {
             if (searchExtendingEdge != null && running) {
                 text = (searchExtendingLater ? "\u2192 " : "\u2190 ")
-                        + RangeText.endpoint(searchExtendingEdge, anchor, now, DateTimeFormatterManager.zoneId());
+                        + DateTimeFormatterManager.formatRangeEndpoint(searchExtendingEdge, anchor, now);
                 shorter = text;
             } else if (searchHitCount != null && searchHitCount == 0
                     && textSearchPhase == SearchStatusText.Phase.COMPLETE) {

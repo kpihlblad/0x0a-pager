@@ -76,6 +76,23 @@ class DateTimeFormatterManagerTest {
     }
 
     @Test
+    void statusBarRangeDatesUseTheConfiguredLocale() throws ReflectiveOperationException {
+        initFormatter(ZoneOffset.UTC, Locale.US);
+        Instant start = Instant.parse("2017-04-28T09:00:00Z");
+        Instant end = Instant.parse("2017-04-29T10:00:30Z");
+        Instant now = Instant.parse("2026-10-26T12:00:00Z");
+
+        assertThat(DateTimeFormatterManager.formatRange(start, end, end, now))
+                .isEqualTo("4/28/17, 9:00 AM \u2192 10:00:30 AM");
+        assertThat(DateTimeFormatterManager.formatRangeEndpoint(start, end, now))
+                .isEqualTo("4/28/17, 9:00 AM");
+        assertThat(DateTimeFormatterManager.formatRangeStep(end, start, end, now))
+                .isEqualTo("1d 1h earlier (4/28/17, 9:00 AM)");
+        assertThat(DateTimeFormatterManager.formatRangeFull(start, end))
+                .isEqualTo("4/28/17, 9:00:00 AM \u2192 4/29/17, 10:00:30 AM (\u0394 1d 1h 00m)");
+    }
+
+    @Test
     void nullsFormatAsEmpty() {
         assertThat(DateTimeFormatterManager.formatLogTimestamp(null)).isEmpty();
         assertThat(DateTimeFormatterManager.formatFullLogTimestamp(null)).isEmpty();
@@ -84,11 +101,15 @@ class DateTimeFormatterManagerTest {
 
     /** The manager is a singleton that keeps its first config: drop it so this test's zone takes effect. */
     private static void initFormatter(ZoneId zone) throws ReflectiveOperationException {
+        initFormatter(zone, Locale.of("sv", "SE"));
+    }
+
+    private static void initFormatter(ZoneId zone, Locale locale) throws ReflectiveOperationException {
         Field instance = DateTimeFormatterManager.class.getDeclaredField("instance");
         instance.setAccessible(true);
         instance.set(null, null);
         Config config = mock(Config.class);
-        when(config.getLocale()).thenReturn(Locale.of("sv", "SE"));
+        when(config.getLocale()).thenReturn(locale);
         when(config.getZoneId()).thenReturn(zone);
         DateTimeFormatterManager.initialize(config);
     }

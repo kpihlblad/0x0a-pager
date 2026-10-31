@@ -31,6 +31,8 @@ public class DateTimeFormatterManager {
     private DateTimeFormatter logFormatterWithMillis; // For the log viewer's time column
     private DateTimeFormatter fullFormatterWithNanos; // For the time-column tooltip and log details
     private DateTimeFormatter formatter; // For UI displays
+    private DateTimeFormatter dateTimeWithoutSeconds; // For range endpoints on another date, at a whole minute
+    private DateTimeFormatter timeFormatter; // For range endpoints on the anchor's date
     private DateTimeFormatter dateTimeWithMillis; // For the selection span (date and time)
     private DateTimeFormatter timeWithMillis; // For the selection span (same day)
     private final List<Runnable> changeListeners = new ArrayList<>();
@@ -122,28 +124,35 @@ public class DateTimeFormatterManager {
      * The search range in the configured zone, e.g. {@code 11:00:00 → 12:10:00} or {@code everything}.
      */
     public static String formatRange(Instant start, Instant end, Instant anchor, Instant now) {
-        return RangeText.range(start, end, anchor, now, zoneId());
+        var mgr = getInstance();
+        return RangeText.range(start, end, anchor, now, mgr.config.getZoneId(), mgr.timeFormatter,
+                mgr.dateTimeWithoutSeconds, mgr.formatter);
     }
 
     /**
      * The Y/N button text for widening a range edge to a suggested boundary, e.g. {@code 1h earlier (11:00:00)}.
      */
     public static String formatRangeStep(Instant edge, Instant suggested, Instant anchor, Instant now) {
-        return RangeText.step(edge, suggested, anchor, now, zoneId());
+        var mgr = getInstance();
+        return RangeText.step(edge, suggested, anchor, now, mgr.config.getZoneId(), mgr.timeFormatter,
+                mgr.dateTimeWithoutSeconds, mgr.formatter);
     }
 
     /**
      * One range endpoint in the configured zone, e.g. {@code 11:00:00}, {@code now} or {@code start}.
      */
     public static String formatRangeEndpoint(Instant t, Instant anchor, Instant now) {
-        return RangeText.endpoint(t, anchor, now, zoneId());
+        var mgr = getInstance();
+        return RangeText.endpoint(t, anchor, now, mgr.config.getZoneId(), mgr.timeFormatter,
+                mgr.dateTimeWithoutSeconds, mgr.formatter);
     }
 
     /**
      * The full absolute range in the configured zone, for tooltips.
      */
     public static String formatRangeFull(Instant start, Instant end) {
-        return RangeText.full(start, end, zoneId());
+        var mgr = getInstance();
+        return RangeText.full(start, end, mgr.config.getZoneId(), mgr.formatter);
     }
 
     /**
@@ -177,6 +186,8 @@ public class DateTimeFormatterManager {
         this.logFormatterWithMillis = DTUtil.createTimeFormatterWithMillis(locale);
         this.fullFormatterWithNanos = DTUtil.createFullFormatterWithNanos(locale);
         this.formatter = DTUtil.createDateTimeFormatter(locale);
+        this.dateTimeWithoutSeconds = DTUtil.createDateTimeFormatterWithoutSeconds(locale);
+        this.timeFormatter = DTUtil.createTimeFormatter(locale);
         this.dateTimeWithMillis = DTUtil.createDateTimeFormatterWithMillis(locale);
         this.timeWithMillis = DTUtil.createTimeFormatterWithMillis(locale);
     }
