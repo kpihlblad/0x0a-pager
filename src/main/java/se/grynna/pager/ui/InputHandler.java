@@ -67,6 +67,18 @@ public class InputHandler {
     /** The last press in the log only closed the time panel; its drag, release and click are ignored. */
     private boolean pressClosedTimePanel;
 
+    /** The last press did not start a left-button selection in the log; its drag is ignored. */
+    private boolean ignoreDrag;
+
+    private static final int DRAG_SCROLL_INTERVAL_MS = 50;
+
+    /** Scrolls and extends the selection repeatedly while a drag stays outside the visible log panel. */
+    private final Timer dragScrollTimer = new Timer(DRAG_SCROLL_INTERVAL_MS, e -> dragScrollTick());
+    private int dragScrollLines;
+    private int dragScrollCols;
+    private int dragVisibleLine;
+    private int dragVisibleCol;
+
     /**
      * The {@link KeyBinding.Context#ANY} actions that still work while the details are open: they drive the details
      * panel (cursor keys, paging, Ctrl-C) or leave it (Esc, help, login). The rest, selection, search and goto among
@@ -110,24 +122,31 @@ public class InputHandler {
         this.clickHandler = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                stopDragScroll();
                 endSearchGuard.reset();
                 pressClosedTimePanel = viewPort.closeTimePanel();
                 if (pressClosedTimePanel) {
+                    ignoreDrag = true;
                     return;
                 }
                 if (e.isPopupTrigger()) {
+                    ignoreDrag = true;
                     openRowMenu(e);
                     return;
                 }
                 // Skip multi-click presses — the second press of a double-click (clickCount=2)
                 // would overwrite the saved previous selection before mouseClicked can use it
-                if (e.getClickCount() > 1) return;
+                if (e.getClickCount() > 1) {
+                    ignoreDrag = true;
+                    return;
+                }
+                ignoreDrag = !isLeftButtonGesture(e);
                 mouse(e, false);
             }
 
             @Override
             public void mouseDragged(MouseEvent e) {
-                if (pressClosedTimePanel) {
+                if (pressClosedTimePanel || ignoreDrag) {
                     return;
                 }
                 mouse(e, true);
@@ -135,6 +154,8 @@ public class InputHandler {
 
             @Override
             public void mouseReleased(MouseEvent e) {
+                stopDragScroll();
+                ignoreDrag = false;
                 if (pressClosedTimePanel) {
                     return;
                 }
@@ -261,22 +282,142 @@ public class InputHandler {
                     }
                 }
 
+                if (!isLeftButtonGesture(e)) {
+                    return;
+                }
+
                 var charSize = viewPort.getCharacterSize();
                 if (charSize == null) {
+                    return;
+                }
+
+                if (dragged) {
+                    handleDrag(e, charSize);
                     return;
                 }
 
                 int line = e.getY() / charSize.height();
                 int col = Math.max(0, e.getX() - LineRenderer.iconSpaceWidth(charSize.height())) / charSize.width();
                 try {
-                    log.trace("Mouse event: {} {},{}, drag={} ", dragged ? "drag" : "click", line, col, dragged);
-                    cursorManager.setCursorFromClick(line, col, dragged);
+                    log.trace("Mouse event: click {},{}, drag=false ", line, col);
+                    cursorManager.setCursorFromClick(line, col, false);
                     offerSelectionToPrompt();
                 } catch (Exception ex) {
                     log.error("Click error", ex);
                 }
             }
+
+            private void handleDrag(MouseEvent e, LogViewer.CharacterSize charSize) {
+                if (cursorManager.getCursor().isEmpty()) {
+                    return;
+                }
+
+                int rawLine = Math.floorDiv(e.getY(), charSize.height());
+                int iconWidth = LineRenderer.iconSpaceWidth(charSize.height());
+                int rawCol = Math.max(0, e.getX() - iconWidth) / charSize.width();
+
+                int linesPerPage = cursorManager.getLinesPerPage();
+                int maxVisibleLine = Math.max(0, linesPerPage - 1);
+
+                Component component = e.getComponent();
+                int componentHeight = component != null ? component.getHeight() : 0;
+                int componentWidth = component != null ? component.getWidth() : 0;
+                int visibleCols = componentWidth > 0
+                        ? Math.max(1, (componentWidth - iconWidth) / charSize.width())
+                        : Integer.MAX_VALUE;
+                int maxVisibleCol = visibleCols - 1;
+
+                int scrollLines = 0;
+                int visibleLine = rawLine;
+                if (e.getY() < 0) {
+                    scrollLines = -1;
+                    visibleLine = 0;
+                } else if ((linesPerPage > 0 && rawLine >= linesPerPage)
+                        || (componentHeight > 0 && e.getY() >= componentHeight)) {
+                    scrollLines = 1;
+                    visibleLine = maxVisibleLine;
+                }
+
+                int scrollCols = 0;
+                int visibleCol = rawCol;
+                if (e.getX() < 0) {
+                    scrollCols = -1;
+                    visibleCol = 0;
+                } else if (rawCol >= visibleCols || (componentWidth > 0 && e.getX() >= componentWidth)) {
+                    scrollCols = 1;
+                    visibleCol = maxVisibleCol;
+                }
+
+                if (scrollLines == 0 && scrollCols == 0) {
+                    stopDragScroll();
+                    try {
+                        log.trace("Mouse event: drag {},{}, drag=true ", visibleLine, visibleCol);
+                        cursorManager.setCursorFromClick(visibleLine, visibleCol, true);
+                        offerSelectionToPrompt();
+                    } catch (Exception ex) {
+                        log.error("Click error", ex);
+                    }
+                    return;
+                }
+
+                dragScrollLines = scrollLines;
+                dragScrollCols = scrollCols;
+                dragVisibleLine = visibleLine;
+                dragVisibleCol = visibleCol;
+                stepDragScroll();
+                if (!dragScrollTimer.isRunning()) {
+                    dragScrollTimer.start();
+                }
+            }
+
+            private boolean isLeftButtonGesture(MouseEvent e) {
+                if (e.isConsumed() || e.isPopupTrigger()) {
+                    return false;
+                }
+                int otherButtons = InputEvent.BUTTON2_DOWN_MASK | InputEvent.BUTTON3_DOWN_MASK;
+                if ((e.getModifiersEx() & otherButtons) != 0
+                        && (e.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) == 0) {
+                    return false;
+                }
+                return e.getButton() == MouseEvent.BUTTON1 || e.getButton() == MouseEvent.NOBUTTON;
+            }
         };
+    }
+
+    /** Advances one auto-scroll step while dragging outside the visible log panel. */
+    void dragScrollTick() {
+        if (dragScrollLines == 0 && dragScrollCols == 0) {
+            stopDragScroll();
+            return;
+        }
+        if (cursorManager.getCursor().isEmpty()) {
+            stopDragScroll();
+            return;
+        }
+        stepDragScroll();
+    }
+
+    /** True while drag-selection auto-scroll is active. */
+    boolean isDragScrolling() {
+        return dragScrollTimer.isRunning();
+    }
+
+    private void stepDragScroll() {
+        try {
+            cursorManager.scrollContent(dragScrollLines, dragScrollCols);
+            cursorManager.setCursorFromClick(dragVisibleLine, dragVisibleCol, true);
+            offerSelectionToPrompt();
+        } catch (Exception ex) {
+            log.error("Drag scroll error", ex);
+        }
+    }
+
+    private void stopDragScroll() {
+        dragScrollLines = 0;
+        dragScrollCols = 0;
+        if (dragScrollTimer.isRunning()) {
+            dragScrollTimer.stop();
+        }
     }
 
     /**
