@@ -46,6 +46,21 @@ class RowContextMenuTest {
         }
 
         @Override
+        public void searchForSelection() {
+            calls.add("searchSelection");
+        }
+
+        @Override
+        public void narrowToSelection() {
+            calls.add("narrowSelection");
+        }
+
+        @Override
+        public void excludeSelection() {
+            calls.add("excludeSelection");
+        }
+
+        @Override
         public void narrowToMatches() {
             calls.add("narrowMatches");
         }
@@ -122,9 +137,29 @@ class RowContextMenuTest {
     }
 
     @Test
-    void thereIsNoSearchForSelectionItemBecauseThatKeyHasNoHandlerYet() {
+    void searchForSelectionShowsOnlyWithSelectedText() {
         assertThat(texts(RowContextMenu.build(model(ALL_LEVELS, false, true), actions)))
                 .noneMatch(t -> t.toLowerCase().contains("search"));
+
+        Model selected = new Model(ALL_LEVELS, Level.THREAD, false, false, "selected text", KEYS);
+        assertThat(texts(RowContextMenu.build(selected, actions))).contains("Search for selection");
+    }
+
+    @Test
+    void selectedTextGetsATermRowAndItsOwnHandlers() {
+        Model selected = new Model(ALL_LEVELS, Level.THREAD, false, false, "selected text", KEYS);
+        JPopupMenu menu = RowContextMenu.build(selected, actions);
+
+        assertThat(ActivityMenuTest.buttonTooltips(menu)).containsExactly("Narrow to thread scheduler-10 (a)",
+                "Exclude thread scheduler-10", "Narrow to process casbatch-7f9c", "Exclude process casbatch-7f9c",
+                "Narrow to request 4bf92f3577b34da6 (A)", "Exclude request 4bf92f3577b34da6",
+                "Narrow to selection \"selected text\"", "Exclude selection \"selected text\"");
+        ActivityMenuTest.buttons(menu).stream().filter(b -> b.getName().endsWith("selection"))
+                .forEach(JButton::doClick);
+        items(menu).stream().filter(item -> item.getText().equals("Search for selection")).findFirst().orElseThrow()
+                .doClick();
+
+        assertThat(calls).containsExactly("narrowSelection", "excludeSelection", "searchSelection");
     }
 
     @Test

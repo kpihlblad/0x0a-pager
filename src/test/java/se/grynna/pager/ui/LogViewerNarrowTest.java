@@ -17,6 +17,7 @@ import se.grynna.pager.splunk.SearchHit;
 import se.grynna.pager.splunk.SearchManager;
 import se.grynna.pager.splunk.SearchSession;
 import se.grynna.pager.splunk.SearchSessionTestSupport;
+import se.grynna.pager.splunk.Searcher;
 import se.grynna.pager.splunk.SplunkLogDataProvider;
 import se.grynna.pager.ui.clip.InMemoryClipboard;
 import se.grynna.pager.ui.preferences.DateTimeFormatterManager;
@@ -496,6 +497,57 @@ class LogViewerNarrowTest {
     }
 
     @Test
+    void theRowMenuNarrowsToTheSelectedTextAlongsideTheActivityTerms() throws Exception {
+        onEdt(() -> {
+            selectMessage(3);
+            JPopupMenu menu = viewer.rowContextMenu();
+
+            assertThat(find(menu, JButton.class).stream().map(JButton::getToolTipText))
+                    .contains("Narrow to selection \"message\"", "Exclude selection \"message\"");
+            assertThat(texts(menu)).contains("Search for selection");
+
+            button(menu, "Narrow to selection \"message\"").doClick();
+
+            assertThat(scopeSet().narrow()).containsExactly("message");
+            verify(logProvider).jump(SearchHit.from(line(3)));
+        });
+    }
+
+    @Test
+    void theRowMenuSearchesForTheSelectedText() throws Exception {
+        onEdt(() -> {
+            SearchSession searching = new SearchSession("message", line(3).getSplunkTime());
+            Searcher searcher = mock(Searcher.class);
+            when(searcher.getSession()).thenReturn(searching);
+            when(searchManager.search(any(String.class), any(Instant.class))).thenAnswer(invocation -> {
+                session.set(searching);
+                return searcher;
+            });
+            selectMessage(3);
+
+            menuItem(viewer.rowContextMenu(), "Search for selection").doClick();
+
+            verify(searchManager).search("message", line(3).getSplunkTime());
+            verify(searcher).start();
+        });
+    }
+
+    @Test
+    void theSelectionActionBarExcludesTheSelectedText() throws Exception {
+        onEdt(() -> {
+            selectMessage(3);
+            JButton exclude = find(statusBar, JButton.class).stream().filter(b -> b.getText().equals("− Exclude"))
+                    .findFirst().orElseThrow();
+            assertThat(exclude.isVisible()).isTrue();
+
+            exclude.doClick();
+
+            assertThat(scopeSet().exclude()).containsExactly("message");
+            assertThat(exclude.isVisible()).as("the scope change clears the selection").isFalse();
+        });
+    }
+
+    @Test
     void theRowMenuHasNoLevelsForARowWithoutActivityAndNoMenuWithoutACursor() throws Exception {
         onEdt(() -> {
             viewer.cursorManager().ensureCursorAt(8);
@@ -653,6 +705,13 @@ class LogViewerNarrowTest {
     private static JButton button(Container root, String tooltip) {
         return find(root, JButton.class).stream().filter(b -> tooltip.equals(b.getToolTipText())).findFirst()
                 .orElseThrow(() -> new AssertionError("no button " + tooltip));
+    }
+
+    private void selectMessage(int row) throws Exception {
+        int start = DecoratedLogLine.getPreambleLength();
+        viewer.cursorManager().setCursorFromClick(row, start, false);
+        viewer.cursorManager().setCursorFromClick(row, start + "message".length(), true);
+        assertThat(viewer.cursorManager().singleRowSelectionText()).contains("message");
     }
 
     /** A finished search whose matches are the events of {@code matchRows}. */

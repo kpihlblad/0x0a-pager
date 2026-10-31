@@ -115,6 +115,7 @@ public class StatusBar extends JPanel {
     private final InstantSource nowSource;
     private final JPanel leftPanel;
     private final JPanel rightPanel;
+    private final JPanel inputBarLeft;
 
     // Reference to parent viewer for focus management
     private final LogViewer logViewer;
@@ -140,6 +141,8 @@ public class StatusBar extends JPanel {
     private Instant firstVisibleTimestamp;
     /** Time range of the selection while two or more rows are selected; the date field shows it instead. */
     private CursorManager.SelectionSpan selectionSpan;
+    /** One-line selected text offered to Narrow and Exclude, or null when the selection is not a scope term. */
+    private String selectionTerm;
     private boolean modalLogin;
     private boolean modalIndex;
     private String lastSearchQuery;
@@ -175,8 +178,9 @@ public class StatusBar extends JPanel {
 
     /** Gray × — leave search mode. Not the red cancel, which reads as an error. */
     private final JButton searchExitButton;
-    private final JButton narrowButton;
-    private final JButton excludeButton;
+    private final ActionPill selectionSearchButton;
+    private final ActionPill narrowButton;
+    private final ActionPill excludeButton;
     /** Bookmarks view only: copy every bookmark as shown, and open the Export dialog on them. */
     private final JButton bookmarksCopyButton;
     private final JButton bookmarksExportButton;
@@ -338,18 +342,34 @@ public class StatusBar extends JPanel {
         searchExitButton.setVisible(false);
         searchExitButton.addActionListener(e -> logViewer.cancelSearch());
 
-        // Fold the active search into the scope.
-        narrowButton = new JButton("+ Narrow");
-        styleChromeButton(narrowButton, font, false);
+        selectionSearchButton = new ActionPill("Search", DarculaColors.COMMENT, font);
+        selectionSearchButton.setToolTipText(RowContextMenu.searchSelectionText(null));
+        selectionSearchButton.setVisible(false);
+        selectionSearchButton.addActionListener(e -> logViewer.searchForSelection());
+
+        // Fold the selected text, or the active search when there is no selection, into the scope.
+        narrowButton = new ActionPill(RowContextMenu.NARROW_LABEL, DarculaColors.MIDNIGHT_BLUE, font);
         narrowButton.setToolTipText(MenuManager.narrowText(KeyMap.preferred()));
         narrowButton.setVisible(false);
-        narrowButton.addActionListener(e -> logViewer.narrowScopeToSearch());
+        narrowButton.addActionListener(e -> {
+            if (selectionTerm != null) {
+                logViewer.narrowScopeToSelection();
+            } else {
+                logViewer.narrowScopeToSearch();
+            }
+        });
 
-        excludeButton = new JButton("\u2212 Exclude");
-        styleChromeButton(excludeButton, font, false);
+        excludeButton = new ActionPill(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_RED, font);
         excludeButton.setToolTipText(MenuManager.excludeText(KeyMap.preferred()));
         excludeButton.setVisible(false);
-        excludeButton.addActionListener(e -> logViewer.excludeSearchFromScope());
+        excludeButton.addActionListener(e -> {
+            if (selectionTerm != null) {
+                logViewer.excludeSelectionFromScope();
+            } else {
+                logViewer.excludeSearchFromScope();
+            }
+        });
+        alignActionPillHeights();
 
         bookmarksCopyButton = new JButton("Copy all");
         styleChromeButton(bookmarksCopyButton, font, false);
@@ -425,7 +445,7 @@ public class StatusBar extends JPanel {
         setupInputFieldClipboard();
 
         // Left side: prompt + input field
-        JPanel inputBarLeft = new JPanel();
+        inputBarLeft = new JPanel();
         inputBarLeft.setLayout(new BoxLayout(inputBarLeft, BoxLayout.X_AXIS));
 
         inputBarLeft.setBackground(DarculaColors.BACKGROUND);
@@ -437,6 +457,7 @@ public class StatusBar extends JPanel {
         inputBarLeft.add(boundaryPromptYN);
         inputBarLeft.add(searchStopButton);
         inputBarLeft.add(searchExitButton);
+        inputBarLeft.add(selectionSearchButton);
         inputBarLeft.add(narrowButton);
         inputBarLeft.add(excludeButton);
         inputBarLeft.add(bookmarksCopyButton);
@@ -452,6 +473,12 @@ public class StatusBar extends JPanel {
         inputHint.setBorder(BorderFactory.createEmptyBorder(VPAD, 8, VPAD, 5));
         inputHint.setVisible(false);
         inputBarLeft.add(inputHint);
+        inputBarLeft.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                applySearchChrome();
+            }
+        });
 
         // Search button and goto button
         // Actions are looked up at click time because InputHandler.setup() runs after StatusBar construction
@@ -1058,6 +1085,14 @@ public class StatusBar extends JPanel {
         button.setFocusable(false);
     }
 
+    /** Give the three text actions the same height as the icon chrome buttons beside them. */
+    private void alignActionPillHeights() {
+        int height = searchExitButton.getPreferredSize().height;
+        selectionSearchButton.alignHeight(height);
+        narrowButton.alignHeight(height);
+        excludeButton.alignHeight(height);
+    }
+
     /**
      * Show a transient state notice (e.g. "No matches", "Esc again to end search") in the
      * status row. One notice at a time: a new one replaces the previous one. It clears
@@ -1514,6 +1549,23 @@ public class StatusBar extends JPanel {
         scopeChips.setTerms(narrow, exclude);
     }
 
+    /** Whether both selection buttons fit while leaving the input field its minimum width. */
+    private boolean selectionButtonsFit() {
+        if (inputBarLeft == null || inputBarLeft.getWidth() <= 0) {
+            return true;
+        }
+        int required = 0;
+        for (Component component : inputBarLeft.getComponents()) {
+            if (component == inputField) {
+                required += component.getMinimumSize().width;
+            } else if (component.isVisible() || component == selectionSearchButton || component == narrowButton
+                    || component == excludeButton) {
+                required += component.getPreferredSize().width;
+            }
+        }
+        return required <= inputBarLeft.getWidth();
+    }
+
     /**
      * Spinner and stop square mean "the query is running".
      * The gray × means "leave search mode" and is hidden while an extend question is up,
@@ -1528,10 +1580,23 @@ public class StatusBar extends JPanel {
         boolean promptBlocking = searchExtendActive || searchRecentreActive || scopeConfirmText != null;
         searchExitButton.setVisible(inSearch && !promptBlocking);
         KeyMap keyMap = KeyMap.preferred();
-        narrowButton.setToolTipText(MenuManager.narrowText(keyMap));
-        excludeButton.setToolTipText(MenuManager.excludeText(keyMap));
-        narrowButton.setVisible(inSearch && !promptBlocking);
-        excludeButton.setVisible(inSearch && !promptBlocking);
+        boolean selectionView = switch (inputState) {
+            case SCROLL, CURSOR, SELECTING, SEARCH_ACTIVE, MATCHES, BOOKMARKS -> true;
+            default -> false;
+        };
+        boolean selectionActions = selectionTerm != null && selectionView && !promptBlocking && !detailsMode
+                && (inSearch || selectionButtonsFit());
+        selectionSearchButton
+                .setToolTipText(RowContextMenu.searchSelectionText(selectionActions ? selectionTerm : null));
+        selectionSearchButton.setVisible(selectionActions);
+        narrowButton.setToolTipText(selectionActions
+                ? RowContextMenu.narrowSelectionText(selectionTerm)
+                : MenuManager.narrowText(keyMap));
+        excludeButton.setToolTipText(selectionActions
+                ? RowContextMenu.excludeSelectionText(selectionTerm)
+                : MenuManager.excludeText(keyMap));
+        narrowButton.setVisible(selectionActions || (inSearch && !promptBlocking));
+        excludeButton.setVisible(selectionActions || (inSearch && !promptBlocking));
         searchStopButton.setVisible(running && inSearch && !promptBlocking);
         textSearchSpinner.setVisible(running);
         textSearchSpinner.setIndeterminate(running);
@@ -1574,7 +1639,6 @@ public class StatusBar extends JPanel {
         if (entering && state.needsInput()) {
             inputFlash.start();
         }
-        applySearchChrome();
 
         // Format the prompt text: key tokens resolve against the key map, then the %s args fill in.
         String formattedPrompt = state.text(args);
@@ -1593,6 +1657,7 @@ public class StatusBar extends JPanel {
         String hint = state.hint(KeyMap.preferred());
         inputHint.setText(hint);
         inputHint.setVisible(!hint.isEmpty());
+        applySearchChrome();
 
         // Trigger layout update
         Container parent = promptField.getParent();
@@ -1675,6 +1740,15 @@ public class StatusBar extends JPanel {
     public void setSelectionSpan(CursorManager.SelectionSpan span) {
         this.selectionSpan = span;
         renderDateField();
+    }
+
+    /** The selected one-line term offered by Narrow and Exclude, or null to offer the active search instead. */
+    public void setSelectionTerm(String term) {
+        if (Objects.equals(selectionTerm, term)) {
+            return;
+        }
+        selectionTerm = term;
+        applySearchChrome();
     }
 
     private void renderDateField() {

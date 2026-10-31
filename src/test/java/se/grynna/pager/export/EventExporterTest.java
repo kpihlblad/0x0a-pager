@@ -157,7 +157,7 @@ class EventExporterTest {
         assertThat(html).startsWith("<table>").endsWith("</table>\n");
         assertThat(html).contains("a &lt; b &amp; &quot;c&quot; 'd' &uuml;");
         assertThat(html).doesNotContain("a < b");
-        assertThat(html).contains("<tr style=\"color:#e05555\">");
+        assertThat(html).contains("<tr style=\"color:#c02505\">");
         assertThat(html).contains("<td>2017-03-01T11:00:00.123456789+01:00</td><td>ERROR</td>");
         assertThat(html).contains("<tr><td>2017-03-01T11:00:01.000000002+01:00</td><td>INFO</td>");
     }

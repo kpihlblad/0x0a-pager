@@ -25,8 +25,8 @@ import java.util.List;
 
 /**
  * The activity rows of the icon popup and the row context menu: one menu
- * item per level — glyph, level, value — with rounded {@code + Narrow} / {@code − Exclude} buttons, the columns
- * aligned across the rows.
+ * item per level — glyph and value — with rounded {@code + Narrow} / {@code − Exclude} buttons, the columns
+ * aligned across the rows. The row context menu can append the selected text as one more term row.
  *
  * <p>
  * Each row is a {@link JMenuItem}, so the popup's own keyboard navigation reaches it: Up/Down select a row,
@@ -43,15 +43,31 @@ public final class ActivityRows {
         void excludeFrom(Activity.Level level);
     }
 
+    /** The handlers of the selected-text row in the row context menu. */
+    interface SelectionActions {
+        void narrowToSelection();
+
+        void excludeSelection();
+    }
+
     private ActivityRows() {}
 
     /** One row per level, in the given order. */
     static List<Row> build(List<RowContextMenu.LevelItem> levels, Activity.Level defaultLevel, KeyMap keyMap,
             Actions actions) {
+        return build(levels, defaultLevel, keyMap, actions, null, null);
+    }
+
+    /** One row per level, followed by the selected text when present. */
+    static List<Row> build(List<RowContextMenu.LevelItem> levels, Activity.Level defaultLevel, KeyMap keyMap,
+            Actions actions, String selection, SelectionActions selectionActions) {
         Font font = UIManager.getFont("MenuItem.font");
         List<Row> rows = new ArrayList<>();
         for (RowContextMenu.LevelItem item : levels) {
             rows.add(new Row(item, defaultLevel, keyMap, actions, font));
+        }
+        if (selection != null) {
+            rows.add(new Row(selection, selectionActions, font));
         }
         alignColumns(rows);
         return rows;
@@ -83,49 +99,61 @@ public final class ActivityRows {
         };
     }
 
-    /** One level: a menu item laid out as glyph, level, value, Narrow, Exclude. */
+    /** One term: a menu item laid out as glyph, value, Narrow, Exclude. */
     static final class Row extends JMenuItem {
 
-        static final int LABEL_COLUMNS = 3;
+        static final int LABEL_COLUMNS = 2;
 
         private final JLabel[] labels;
-        private final JButton narrow;
-        private final JButton exclude;
+        private final ActionPill narrow;
+        private final ActionPill exclude;
         private boolean excludeChosen;
 
         private Row(RowContextMenu.LevelItem item, Activity.Level defaultLevel, KeyMap keyMap, Actions actions,
                 Font font) {
+            this("activity " + item.level(), glyph(item.level()), item.value(),
+                    RowContextMenu.narrowText(item, defaultLevel, keyMap), RowContextMenu.excludeText(item),
+                    () -> actions.narrowTo(item.level()), () -> actions.excludeFrom(item.level()), font);
+            narrow.setName("narrow " + item.level());
+            exclude.setName("exclude " + item.level());
+        }
+
+        private Row(String selection, SelectionActions actions, Font font) {
+            this("selection", "", selection, RowContextMenu.narrowSelectionText(selection),
+                    RowContextMenu.excludeSelectionText(selection), actions::narrowToSelection,
+                    actions::excludeSelection, font);
+            narrow.setName("narrow selection");
+            exclude.setName("exclude selection");
+        }
+
+        private Row(String name, String glyph, String value, String narrowTooltip, String excludeTooltip,
+                Runnable narrowAction, Runnable excludeAction, Font font) {
             setLayout(new GridBagLayout());
             setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 8));
-            setName("activity " + item.level());
+            setName(name);
             if (font != null) {
                 setFont(font);
             }
-            labels = new JLabel[]{label(glyph(item.level()), DarculaColors.GREY),
-                    label(item.level().label(), DarculaColors.GREY),
-                    label(RowContextMenu.elide(item.value()), DarculaColors.FOREGROUND)};
+            labels = new JLabel[]{label(glyph, DarculaColors.GREY),
+                    label(RowContextMenu.elide(value), DarculaColors.FOREGROUND)};
             // On the row, not the label: a label with a tooltip would take the row's clicks.
-            setToolTipText(item.value());
-            narrow = button("+ Narrow", DarculaColors.CYAN, RowContextMenu.narrowText(item, defaultLevel, keyMap),
-                    () -> actions.narrowTo(item.level()));
-            narrow.setName("narrow " + item.level());
-            exclude = button("\u2212 Exclude", DarculaColors.PINK, RowContextMenu.excludeText(item),
-                    () -> actions.excludeFrom(item.level()));
-            exclude.setName("exclude " + item.level());
+            setToolTipText(value);
+            narrow = button(RowContextMenu.NARROW_LABEL, DarculaColors.MIDNIGHT_BLUE, narrowTooltip, narrowAction);
+            exclude = button(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_RED, excludeTooltip, excludeAction);
 
             GridBagConstraints c = new GridBagConstraints();
             c.anchor = GridBagConstraints.WEST;
             c.insets = new Insets(0, 0, 0, 8);
             for (int column = 0; column < LABEL_COLUMNS; column++) {
                 c.gridx = column;
-                c.weightx = column == 2 ? 1 : 0;
+                c.weightx = column == LABEL_COLUMNS - 1 ? 1 : 0;
                 add(labels[column], c);
             }
             c.weightx = 0;
-            c.gridx = 3;
+            c.gridx = LABEL_COLUMNS;
             c.insets = new Insets(0, 0, 0, 4);
             add(narrow, c);
-            c.gridx = 4;
+            c.gridx = LABEL_COLUMNS + 1;
             c.insets = new Insets(0, 0, 0, 0);
             add(exclude, c);
 
@@ -189,14 +217,8 @@ public final class ActivityRows {
             return label;
         }
 
-        private JButton button(String text, Color accent, String tooltip, Runnable action) {
-            JButton button = new JButton(text);
-            button.putClientProperty("JButton.buttonType", "roundRect");
-            Font font = getFont();
-            button.setFont(font.deriveFont(font.getSize2D() - 1f));
-            button.setForeground(accent);
-            button.setMargin(new Insets(1, 8, 1, 8));
-            button.setFocusable(false);
+        private ActionPill button(String text, Color accent, String tooltip, Runnable action) {
+            ActionPill button = new ActionPill(text, accent);
             button.setToolTipText(tooltip);
             button.addActionListener(e -> {
                 MenuSelectionManager.defaultManager().clearSelectedPath();

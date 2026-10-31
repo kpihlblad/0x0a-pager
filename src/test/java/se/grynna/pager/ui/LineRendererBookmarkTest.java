@@ -125,8 +125,8 @@ class LineRendererBookmarkTest {
         assertThat(contrast(FOREGROUND, BOOKMARK_ROW)).isGreaterThanOrEqualTo(4.5);
         assertThat(contrast(ORANGE, BOOKMARK_ROW)).isGreaterThanOrEqualTo(4.5);
         assertThat(contrast(FOREGROUND, BOOKMARK_CURRENT_LINE)).isGreaterThanOrEqualTo(4.5);
-        // RED already sits below 4.5 on the plain background (3.8:1, not changed here); the row must not drop it much.
-        assertThat(contrast(RED, BOOKMARK_ROW)).isGreaterThanOrEqualTo(2.5);
+        // The palette's error RED sits below 4.5 on the plain background; the row must keep most of that contrast.
+        assertThat(contrast(RED, BOOKMARK_ROW)).isGreaterThanOrEqualTo(contrast(RED, BACKGROUND) * 0.7);
     }
 
     private static BufferedImage render(LineRenderer.ViewKind kind, boolean bookmarked, boolean cursor,

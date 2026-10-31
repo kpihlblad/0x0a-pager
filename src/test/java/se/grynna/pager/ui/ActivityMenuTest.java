@@ -3,14 +3,17 @@ package se.grynna.pager.ui;
 import org.junit.jupiter.api.Test;
 import se.grynna.pager.splunk.Activity.Level;
 import se.grynna.pager.ui.RowContextMenu.LevelItem;
+import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.MenuElement;
 import javax.swing.MenuSelectionManager;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Insets;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -45,6 +48,28 @@ class ActivityMenuTest {
         assertThat(buttonTooltips(menu)).containsExactly("Narrow to thread scheduler-10 (a)",
                 "Exclude thread scheduler-10", "Narrow to process casbatch-7f9c", "Exclude process casbatch-7f9c",
                 "Narrow to request 4bf92f3577b34da6 (A)", "Exclude request 4bf92f3577b34da6");
+    }
+
+    @Test
+    void rowsShowTermsWithoutTypeLabelsAndUseMutedOutlines() {
+        JPopupMenu menu = ActivityMenu.build(ALL_LEVELS, Level.THREAD, KEYS, actions);
+
+        List<String> labels = Arrays.stream(menu.getComponents()).map(Container.class::cast)
+                .flatMap(row -> Arrays.stream(row.getComponents())).filter(JLabel.class::isInstance)
+                .map(JLabel.class::cast).map(JLabel::getText).toList();
+        assertThat(labels).containsExactly("›", "scheduler-10", "▪", "casbatch-7f9c", "⇄", "4bf92f3577b34da6");
+        assertThat(buttons(menu)).allMatch(ActionPill.class::isInstance);
+        assertThat(buttons(menu).stream().map(JButton::getForeground)).containsExactly(DarculaColors.MIDNIGHT_BLUE,
+                DarculaColors.EXCLUDE_RED, DarculaColors.MIDNIGHT_BLUE, DarculaColors.EXCLUDE_RED,
+                DarculaColors.MIDNIGHT_BLUE, DarculaColors.EXCLUDE_RED);
+        assertThat(buttons(menu)).allSatisfy(button -> {
+            ActionPill pill = (ActionPill) button;
+            assertThat(pill.accent()).isEqualTo(pill.getForeground());
+            assertThat(pill.getFont()).isEqualTo(Fontalizer.getFont());
+            assertThat(pill.isContentAreaFilled()).isFalse();
+            assertThat(pill.isBorderPainted()).isFalse();
+            assertThat(pill.getMargin()).isEqualTo(new Insets(0, 4, 0, 4));
+        });
     }
 
     @Test

@@ -40,7 +40,9 @@ public class DarculaColors {
     public static final Color GREEN = new Color(0x62, 0xb5, 0x43);
     public static final Color GREEN_ANDROID_TEXT = new Color(0xa4, 0xc6, 0x39);
     public static final Color PURPLE = new Color(189, 147, 249);
-    public static final Color RED = new Color(0xe0, 0x55, 0x55);
+    public static final Color RED = new Color(0xc0, 0x25, 0x05);
+    /** Darker, muted Exclude-button fill derived from {@link #RED} in OKLCH. */
+    public static final Color EXCLUDE_RED = excludeRed();
     public static final Color PINK = new Color(0xf9, 0x8b, 0x9e);
     public static final Color YELLOW = new Color(221, 220, 110);
     public static final Color CARET = YELLOW;;
@@ -94,6 +96,15 @@ public class DarculaColors {
     public static final Color G7 = new Color(0x8c, 0x8e, 0x9a);
     public static final Color G8 = new Color(0xcc, 0xce, 0xda);
     public static final Color G9 = new Color(0xec, 0xee, 0xfa);
+
+    /**
+     * The error red at 60% brightness with 70% of its OKLCH chroma: darker and less saturated, while keeping its
+     * hue so the Exclude action still reads as red.
+     */
+    private static Color excludeRed() {
+        OKLab.LCH darker = OKLab.colorToOklch(new Color(0x99, 0x1d, 0x04));
+        return OKLab.oklchToColor(OKLab.withChroma(darker, darker.C() * 0.7f));
+    }
 
     private static OKLab.Lab mixOklab(Color from, Color to, float t) {
         OKLab.Lab a = OKLab.colorToOklab(from);

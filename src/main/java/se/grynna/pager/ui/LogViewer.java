@@ -468,6 +468,7 @@ public class LogViewer extends JPanel
             scrollBar.setMaxLineLength(maxLen);
             statusBar.setFirstVisibleTimestamp(firstTimestamp);
             statusBar.setSelectionSpan(selectionSpanOrNull());
+            statusBar.setSelectionTerm(selectionTermOrNull());
             if (isEventDispatchThread()) {
                 pushBrowsingRange();
             }
@@ -527,6 +528,16 @@ public class LogViewer extends JPanel
             return cursorManager.selectionSpan().orElse(null);
         } catch (TemporarySearchException | SearchException | StorageException e) {
             log.debug("Selection span unavailable", e);
+            return null;
+        }
+    }
+
+    /** The selected text when it is a single-line scope term, or null. */
+    private String selectionTermOrNull() {
+        try {
+            return cursorManager.singleRowSelectionText().flatMap(PromptText::fromSelection).orElse(null);
+        } catch (TemporarySearchException | SearchException | StorageException e) {
+            log.debug("Selection text unavailable", e);
             return null;
         }
     }
@@ -1811,7 +1822,7 @@ public class LogViewer extends JPanel
         SearchSession session = currentSearchSession();
         boolean searchMatches = session != null && statusBar.isSearchActive() && session.hitCount() > 0;
         var model = new RowContextMenu.Model(levels, activity.defaultNarrowLevel(),
-                bookmarks.contains(SearchHit.from(line)), searchMatches, KeyMap.preferred());
+                bookmarks.contains(SearchHit.from(line)), searchMatches, selectionTermOrNull(), KeyMap.preferred());
         int row = cursorRow.get();
         return RowContextMenu.build(model, new RowContextMenu.Actions() {
             @Override
@@ -1822,6 +1833,16 @@ public class LogViewer extends JPanel
             @Override
             public void excludeFrom(Activity.Level level) {
                 excludeFromActivity(level, row);
+            }
+
+            @Override
+            public void narrowToSelection() {
+                narrowScopeToSelection();
+            }
+
+            @Override
+            public void excludeSelection() {
+                excludeSelectionFromScope();
             }
 
             @Override
@@ -1837,6 +1858,11 @@ public class LogViewer extends JPanel
             @Override
             public void copyAs() {
                 showCopyAsMenu();
+            }
+
+            @Override
+            public void searchForSelection() {
+                LogViewer.this.searchForSelection();
             }
 
             @Override
@@ -2535,6 +2561,16 @@ public class LogViewer extends JPanel
         return matchesProvider.hitAt(row);
     }
 
+    /** Search for the selected one-line term without opening the prompt. */
+    public void searchForSelection() {
+        String term = selectionTermOrNull();
+        if (term == null) {
+            notice(StatusBar.Severity.INFO, "Nothing to search: select text on one row first");
+            return;
+        }
+        executeSearch(term);
+    }
+
     @Override
     public void executeSearch(String searchTerm) {
         executeSearch(searchTerm, false);
@@ -3015,6 +3051,40 @@ public class LogViewer extends JPanel
     // ------------------------------------------------------------------
     // Scope changes. EDT only.
     // ------------------------------------------------------------------
+
+    /** Narrow the scope to the selected one-line term and reload at the selection's event. */
+    public void narrowScopeToSelection() {
+        changeSelectionScope(true);
+    }
+
+    /** Exclude the selected one-line term from the scope and reload at the top row's time. */
+    public void excludeSelectionFromScope() {
+        changeSelectionScope(false);
+    }
+
+    private void changeSelectionScope(boolean narrowing) {
+        Scope scope = scopeOrWarn();
+        if (scope == null) return;
+        String term = selectionTermOrNull();
+        if (term == null) {
+            notice(StatusBar.Severity.INFO,
+                    "Nothing to " + (narrowing ? "narrow" : "exclude") + ": select text on one row first");
+            return;
+        }
+        if (!narrowing && !Scope.isExcludable(term)) {
+            notice(StatusBar.Severity.WARN, "Cannot exclude \"%s\": use a plain term".formatted(term));
+            return;
+        }
+        Scope next = narrowing ? scope.withNarrow(term) : scope.withExclude(term);
+        if (next.equals(scope)) {
+            notice(StatusBar.Severity.INFO,
+                    (narrowing ? "Already narrowed to" : "Already excluded") + " \"%s\"".formatted(term));
+            return;
+        }
+        SearchHit hit = narrowing ? cursorEventHit(cursorManager.cursorLine().orElse(null)) : null;
+        Instant target = hit != null ? hit.splunkTime() : topRowTime();
+        confirmBookmarksThenChangeScope(scope, next, () -> applyScope(next, hit, target, narrowing));
+    }
 
     /**
      * Narrow: fold the active search's term into the scope, so the log itself now holds
