@@ -64,6 +64,7 @@ class LogViewerScopeTest {
         when(searchManager.getActiveSearchSession()).thenAnswer(inv -> session.get());
         when(searchManager.latestSearchableInstant()).thenReturn(LATEST);
         when(searchManager.storeScopeTerms(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
+        when(searchManager.storeFieldFilters(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
         doAnswer(inv -> {
             scope.set(inv.getArgument(0));
             session.set(null);
@@ -110,7 +111,7 @@ class LogViewerScopeTest {
             order.verify(searchManager).setScope(captured.capture());
             order.verify(provider).jump(hit(10));
             assertThat(captured.getValue().narrow()).containsExactly("boom");
-            assertThat(captured.getValue().fieldFilters()).containsEntry("host", "a1");
+            assertThat(captured.getValue().fieldFilters()).containsEntry("host", List.of("a1"));
 
             assertThat(statusBar.isSearchActive()).isFalse();
             // Only search criteria highlight: the narrowed term does not once the search ended
@@ -263,6 +264,25 @@ class LogViewerScopeTest {
             assertThat(scope.get().narrow()).isEmpty();
             assertThat(scope.get().exclude()).containsExactly("b");
             assertThat(viewer.getHighlightTerms()).isEmpty();
+        });
+    }
+
+    @Test
+    void multiValueFieldFilterShowsOneChipPerValueAndRemovingOneKeepsTheRest() throws Exception {
+        scope.set(Scope.ofValues("web", Map.of("pod", List.of("a", "b"))));
+        Instant top = ORIGIN.plusSeconds(5);
+        onEdt(() -> {
+            viewer.loginComplete(searchManager);
+            ScopeChips chips = find(viewer, ScopeChips.class).getFirst();
+            List<String> chipLabels = find(chips, JLabel.class).stream().map(JLabel::getText).toList();
+            assertThat(chipLabels).containsExactly("+pod=\"a\"", "+pod=\"b\"");
+
+            statusBar.setFirstVisibleTimestamp(top);
+            clearInvocations();
+            viewer.removeScopeTerm(se.grynna.pager.splunk.FieldTerm.of("pod", "a").orElseThrow().encode());
+
+            verify(searchManager).storeFieldFilters("web", Map.of("pod", List.of("b")));
+            assertThat(scope.get().fieldFilters()).containsExactlyEntriesOf(Map.of("pod", List.of("b")));
         });
     }
 

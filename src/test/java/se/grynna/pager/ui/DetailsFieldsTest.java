@@ -37,7 +37,7 @@ class DetailsFieldsTest {
 
     @Test
     void aFieldThatOnlyAnAliasNamesGetsTheNarrowMark() {
-        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", "p1"), List.of(), List.of(), null,
+        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", List.of("p1")), List.of(), List.of(), null,
                 Map.of("kubernetes.pod_name", List.of("kubernetes_pod_name")));
 
         assertThat(DetailsFields.scopeMark(scope, "kubernetes_pod_name")).isEqualTo(ScopeMark.NARROW);

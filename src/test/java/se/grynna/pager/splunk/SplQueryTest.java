@@ -116,12 +116,23 @@ class SplQueryTest {
     @Test
     @DisplayName("a field filter with aliases matches when any of its fields equals the value")
     void scopeRendersAliasesAsOrGroup() {
-        Scope aliased = new Scope("web", Map.of("kubernetes.pod_name", "p1"), List.of(), List.of(), null,
+        Scope aliased = new Scope("web", Map.of("kubernetes.pod_name", List.of("p1")), List.of(), List.of(), null,
                 Map.of("kubernetes.pod_name", List.of("kubernetes_pod_name")));
         assertThat(SplQuery.scope(aliased))
                 .isEqualTo("search index=\"web\" (kubernetes.pod_name=\"p1\" OR kubernetes_pod_name=\"p1\")");
         assertThat(SplQuery.scope(Scope.of("web", Map.of("kubernetes.pod_name", "p1"))))
                 .isEqualTo("search index=\"web\" kubernetes.pod_name=\"p1\"");
+    }
+
+    @Test
+    void scopeRendersMultiValueFiltersWithAndWithoutAliases() {
+        Scope multi = Scope.ofValues("web", Map.of("pod", List.of("a", "b\"1")));
+        assertThat(SplQuery.scope(multi)).isEqualTo("search index=\"web\" (pod=\"a\" OR pod=\"b\\\"1\")");
+
+        Scope aliasedMulti = new Scope("web", Map.of("pod", List.of("a", "b")), List.of(), List.of(), null,
+                Map.of("pod", List.of("x")));
+        assertThat(SplQuery.scope(aliasedMulti))
+                .isEqualTo("search index=\"web\" (pod=\"a\" OR pod=\"b\" OR x=\"a\" OR x=\"b\")");
     }
 
     @Test
@@ -133,7 +144,7 @@ class SplQueryTest {
     @Test
     @DisplayName("Every narrowing term and every excluded term is its own pipeline stage, narrow first")
     void scopeRendersTermsAsSeparateStages() {
-        Scope scope = new Scope("web", Map.of("host", "a1"), List.of("timeout", "user 42"),
+        Scope scope = new Scope("web", Map.of("host", List.of("a1")), List.of("timeout", "user 42"),
                 List.of("healthcheck", "GET /ping"), null);
         assertThat(SplQuery.scope(scope)).isEqualTo("search index=\"web\" host=\"a1\""
                 + " | search \"timeout\" | search \"user 42\""
@@ -151,7 +162,7 @@ class SplQueryTest {
     @Test
     @DisplayName("manual SPL: the raw query comes first, then the term stages")
     void scopeAppendsStagesToManualSpl() {
-        Scope manual = new Scope("web", Map.of("ignored", "x"), List.of("timeout"), List.of("noise"),
+        Scope manual = new Scope("web", Map.of("ignored", List.of("x")), List.of("timeout"), List.of("noise"),
                 "index=app | head 100");
         assertThat(SplQuery.scope(manual))
                 .isEqualTo("search index=app | head 100 | search \"timeout\" | search NOT \"noise\"");
@@ -162,12 +173,12 @@ class SplQueryTest {
     }
 
     @Test
-    @DisplayName("Field terms render as their own stages next to the text terms, value escaped")
-    void scopeRendersFieldTermsInTheirListOrder() {
+    @DisplayName("Field filters render in the predicate, excluded field terms as their own stages, value escaped")
+    void scopeRendersFieldFiltersAndExcludedFieldTerms() {
         Scope scope = Scope.of("web", Map.of()).withNarrow("timeout")
                 .withNarrowField("msg", "say \"hi\"\\x").withExcludeField("level", "DEBUG").withExclude("noise");
-        assertThat(SplQuery.scope(scope)).isEqualTo("search index=\"web\" | search \"timeout\""
-                + " | search msg=\"say \\\"hi\\\"\\\\x\" | search NOT level=\"DEBUG\" | search NOT \"noise\"");
+        assertThat(SplQuery.scope(scope)).isEqualTo("search index=\"web\" msg=\"say \\\"hi\\\"\\\\x\""
+                + " | search \"timeout\" | search NOT level=\"DEBUG\" | search NOT \"noise\"");
     }
 
     @Test

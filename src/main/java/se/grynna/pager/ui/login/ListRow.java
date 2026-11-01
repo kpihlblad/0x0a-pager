@@ -1,5 +1,6 @@
 package se.grynna.pager.ui.login;
 
+import se.grynna.pager.ui.Fontalizer;
 import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.*;
@@ -11,13 +12,14 @@ import java.awt.event.MouseEvent;
 /**
  * A row of the field filter list: a label column whose text is
  * right-aligned against the value, so a label always sits next to its value however long it is, and the
- * value with its × in {@link #valueGroup}. Rows are striped and the row under the mouse lights up, which
+ * value controls in the centre. Rows are striped and the row under the mouse lights up, which
  * carries the eye from label to value. The list sets one label width for all rows ({@link #setLabelWidth});
  * a label that does not fit is elided from the left, its tooltip keeps the full name.
  */
 abstract class ListRow extends JPanel {
 
     static final int ROW_HEIGHT = 30;
+    static final Dimension CHIP_BUTTON_SIZE = new Dimension(20, 22);
     private static final int LABEL_HEIGHT = 24;
     private static final int LABEL_GAP = 6;
     private static final String ELLIPSIS = "…";
@@ -26,6 +28,7 @@ abstract class ListRow extends JPanel {
     private final JLabel nameLabel;
     private final JLabel countLabel;
     private final String fullName;
+    private final MouseAdapter hoverTracker;
     private boolean stripe;
     private boolean hover;
 
@@ -38,6 +41,18 @@ abstract class ListRow extends JPanel {
         this.nameLabel = nameLabel;
         this.countLabel = countLabel;
         this.fullName = nameLabel.getText();
+        this.hoverTracker = new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                setHover(true);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                Point p = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), ListRow.this);
+                setHover(contains(p));
+            }
+        };
         setOpaque(false);
         setBorder(new EmptyBorder(3, 10, 3, 6));
         setMaximumSize(new Dimension(Integer.MAX_VALUE, ROW_HEIGHT));
@@ -94,26 +109,15 @@ abstract class ListRow extends JPanel {
 
     /** Light the row while the mouse is over it or any of its children; call after the children are added. */
     void trackHover() {
-        MouseAdapter tracker = new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                setHover(true);
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                Point p = SwingUtilities.convertPoint(e.getComponent(), e.getPoint(), ListRow.this);
-                setHover(contains(p));
-            }
-        };
-        addTracker(this, tracker);
+        trackHover(this);
     }
 
-    private static void addTracker(Component c, MouseAdapter tracker) {
-        c.addMouseListener(tracker);
+    void trackHover(Component c) {
+        c.removeMouseListener(hoverTracker);
+        c.addMouseListener(hoverTracker);
         if (c instanceof Container container) {
             for (Component child : container.getComponents()) {
-                addTracker(child, tracker);
+                trackHover(child);
             }
         }
     }
@@ -134,23 +138,19 @@ abstract class ListRow extends JPanel {
         super.paintComponent(g);
     }
 
-    /**
-     * The value and its × kept together at their preferred sizes, left-aligned, so neither drifts to
-     * the far edge of a wide row.
-     */
-    static JPanel valueGroup(JComponent value, JButton clear) {
-        JPanel group = new JPanel();
-        group.setLayout(new BoxLayout(group, BoxLayout.X_AXIS));
-        group.setOpaque(false);
-        value.setMaximumSize(value.getPreferredSize());
-        clear.setMaximumSize(clear.getPreferredSize());
-        value.setAlignmentY(CENTER_ALIGNMENT);
-        clear.setAlignmentY(CENTER_ALIGNMENT);
-        group.add(value);
-        group.add(Box.createHorizontalStrut(4));
-        group.add(clear);
-        group.add(Box.createHorizontalGlue());
-        return group;
+    static JButton removeChipButton(String tooltip, Runnable onRemove) {
+        JButton button = new JButton("×");
+        button.setFont(Fontalizer.getFont());
+        button.setForeground(DarculaColors.G7);
+        button.putClientProperty("JButton.buttonType", "toolBarButton");
+        button.setPreferredSize(CHIP_BUTTON_SIZE);
+        button.setMaximumSize(CHIP_BUTTON_SIZE);
+        button.setMargin(new Insets(0, 2, 0, 2));
+        button.setFocusPainted(false);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        button.setToolTipText(tooltip);
+        button.addActionListener(e -> onRemove.run());
+        return button;
     }
 
     /** {@code text}, or {@code …} and as much of its end as fits in {@code room} pixels. */

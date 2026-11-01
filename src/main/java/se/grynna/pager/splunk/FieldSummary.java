@@ -18,6 +18,12 @@ import static org.apache.commons.lang3.StringUtils.containsWhitespace;
 @Slf4j
 @Getter
 public class FieldSummary implements Comparable<FieldSummary>, java.io.Serializable {
+    /**
+     * Cached summaries are Java-serialized in the config store; this is the value computed for the class as first
+     * stored, so those records keep deserializing.
+     */
+    private static final long serialVersionUID = -7954692533558137397L;
+
     private String field;
     private final double relevance;
 
@@ -47,6 +53,21 @@ public class FieldSummary implements Comparable<FieldSummary>, java.io.Serializa
         this.field = field;
         this.values = values;
         this.relevance = relevance;
+    }
+
+    /** Creates a field summary with the given values and relevance score. */
+    public static FieldSummary of(String field, Map<String, Value> values, double relevance) {
+        return new FieldSummary(field, values == null ? Map.of() : new TreeMap<>(values), relevance);
+    }
+
+    /** Creates a field summary with the given values and computes its filtering relevance score. */
+    public static FieldSummary of(String field, Map<String, Value> values) {
+        Map<String, Value> copy = values == null ? Map.of() : new TreeMap<>(values);
+        long count = copy.values().stream().mapToLong(Value::count).sum();
+        long distinct = copy.size();
+        FieldSummary temp = new FieldSummary(field, copy, 0.0);
+        double rel = temp.calculateFilteringRelevance(distinct, count);
+        return new FieldSummary(field, copy, rel);
     }
 
     private Map<String, Value> parseValues(String valueJson) {

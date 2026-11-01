@@ -4,6 +4,7 @@ import com.formdev.flatlaf.FlatClientProperties;
 
 import javax.swing.ButtonModel;
 import javax.swing.JButton;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -16,8 +17,8 @@ import java.awt.geom.RoundRectangle2D;
 
 /**
  * A compact outlined pill button used by the prompt row and the activity rows. It draws its own stadium capsule so
- * the text and border share the action's accent colour without a filled background at rest, while keeping a rounded
- * hover and press tint.
+ * the text and border share the action's accent colour without a filled background at rest. Hover and press add a
+ * tint; the focused look, set by a keyboard-driven menu, adds a stronger tint and a 2 px outline.
  */
 final class ActionPill extends JButton {
 
@@ -25,9 +26,11 @@ final class ActionPill extends JButton {
     private static final int HORIZONTAL_PADDING = 4;
     private static final int VERTICAL_PADDING = 5;
     private static final int HOVER_ALPHA = 36;
+    private static final int FOCUSED_ALPHA = 56;
     private static final int PRESSED_ALPHA = 64;
 
     private final Color accent;
+    private boolean focusedLook;
 
     ActionPill(String text, Color accent) {
         this(text, accent, Fontalizer.getFont(), DEFAULT_MARGIN);
@@ -57,6 +60,18 @@ final class ActionPill extends JButton {
     /** The accent colour of the pill's text and rounded border. */
     Color accent() {
         return accent;
+    }
+
+    /** Show the focused look, which a keyboard selection in a menu uses to mark the pill it would press. */
+    void setFocusedLook(boolean focused) {
+        if (focusedLook != focused) {
+            focusedLook = focused;
+            repaint();
+        }
+    }
+
+    boolean hasFocusedLook() {
+        return focusedLook;
     }
 
     /** Match the chrome buttons' height while keeping the width the label needs. */
@@ -90,13 +105,16 @@ final class ActionPill extends JButton {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             ButtonModel model = getModel();
-            if (isEnabled() && (model.isRollover() || model.isPressed())) {
-                int alpha = model.isPressed() ? PRESSED_ALPHA : HOVER_ALPHA;
+            if (isEnabled() && (model.isRollover() || model.isPressed() || focusedLook)) {
+                int alpha = model.isPressed() ? PRESSED_ALPHA : focusedLook ? FOCUSED_ALPHA : HOVER_ALPHA;
                 g2.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), alpha));
                 g2.fill(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, h - 1f, h - 1f));
             }
+            float inset = focusedLook ? 1f : 0.5f;
+            float outline = h - 2 * inset;
+            g2.setStroke(new BasicStroke(focusedLook ? 2f : 1f));
             g2.setColor(accent);
-            g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, h - 1f, h - 1f));
+            g2.draw(new RoundRectangle2D.Float(inset, inset, w - 2 * inset, h - 2 * inset, outline, outline));
 
             Insets margin = getMargin();
             FontMetrics fm = g2.getFontMetrics(getFont());

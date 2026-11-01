@@ -1676,10 +1676,11 @@ public class LogViewer extends JPanel
     }
 
     /**
-     * Narrow the scope to the activity of the loaded row {@code row} at {@code level}: every
-     * {@link Activity#narrowTerms} term not already in the scope is folded in as one scope change (the same one
-     * Narrow makes, so the bookmark question, the chips and the undo are the same). The log reloads at the row's
-     * event, highlighted. A notice says why when the level has no terms or the scope has them all. In the Matches and
+     * Narrow the scope to the activity of the loaded row {@code row} at {@code level}: every term of
+     * {@link LoadedLogLine#activityTerms} not already in the scope is folded in as one scope change (the same one
+     * Narrow makes, so the bookmark question, the chips and the undo are the same). A structured part of the
+     * activity becomes a field filter, a part sniffed from the text a text term. The log reloads at the row's event,
+     * highlighted. A notice says why when the level has no terms or the scope has them all. In the Matches and
      * Bookmarks views the change leaves the view for the log, as Narrow does.
      */
     public void narrowToActivity(Activity.Level level, int row) {
@@ -1696,13 +1697,16 @@ public class LogViewer extends JPanel
         if (scope == null) {
             return;
         }
-        List<String> terms = line.resolvedActivity().narrowTerms(level);
+        ActivityFields.Terms terms = line.activityTerms(level);
         if (terms.isEmpty()) {
             notice(StatusBar.Severity.INFO, cantNarrow(level));
             return;
         }
         Scope narrowed = scope;
-        for (String term : terms) {
+        for (ActivityFields.SourceField field : terms.fields()) {
+            narrowed = narrowed.withNarrowField(field.name(), field.value());
+        }
+        for (String term : terms.texts()) {
             narrowed = narrowed.withNarrow(term);
         }
         if (narrowed.equals(scope)) {
@@ -1715,9 +1719,10 @@ public class LogViewer extends JPanel
     }
 
     /**
-     * Exclude the activity of the loaded row {@code row} at {@code level} from the scope: every
-     * {@link Activity#narrowTerms} term not already excluded is folded in as one Exclude ({@code NOT}) term. The
-     * log reloads at its top row, like Exclude does.
+     * Exclude the activity of the loaded row {@code row} at {@code level} from the scope: every term of
+     * {@link LoadedLogLine#activityTerms} not already excluded is folded in as an Exclude ({@code NOT}) term; a
+     * structured part excludes its field value, a sniffed part its text. The log reloads at its top row, like Exclude
+     * does.
      */
     public void excludeFromActivity(Activity.Level level, int row) {
         LoadedLogLine line = loadedLineAt(row);
@@ -1733,13 +1738,16 @@ public class LogViewer extends JPanel
         if (scope == null) {
             return;
         }
-        List<String> terms = line.resolvedActivity().narrowTerms(level);
+        ActivityFields.Terms terms = line.activityTerms(level);
         if (terms.isEmpty()) {
             notice(StatusBar.Severity.INFO, cantExclude(level));
             return;
         }
         Scope excluded = scope;
-        for (String term : terms) {
+        for (ActivityFields.SourceField field : terms.fields()) {
+            excluded = excluded.withExcludeField(field.name(), field.value());
+        }
+        for (String term : terms.texts()) {
             if (!Scope.isExcludable(term)) {
                 notice(StatusBar.Severity.WARN, "Cannot exclude \"%s\": use a plain term".formatted(term));
                 return;
@@ -1818,7 +1826,7 @@ public class LogViewer extends JPanel
             return null;
         }
         Activity activity = line.resolvedActivity();
-        List<RowContextMenu.LevelItem> levels = activityLevels(activity);
+        List<RowContextMenu.LevelItem> levels = activityLevels(line);
         SearchSession session = currentSearchSession();
         boolean searchMatches = session != null && statusBar.isSearchActive() && session.hitCount() > 0;
         var model = new RowContextMenu.Model(levels, activity.defaultNarrowLevel(),
@@ -1882,12 +1890,13 @@ public class LogViewer extends JPanel
         });
     }
 
-    /** The levels the activity can be narrowed or excluded at, coarse to fine, with the value to show for each. */
-    private static List<RowContextMenu.LevelItem> activityLevels(Activity activity) {
+    /** The levels the row's activity can be narrowed or excluded at, coarse to fine, with the value shown for each. */
+    private static List<RowContextMenu.LevelItem> activityLevels(LoadedLogLine line) {
+        Activity activity = line.resolvedActivity();
         List<RowContextMenu.LevelItem> levels = new ArrayList<>();
         for (Activity.Level level : new Activity.Level[]{Activity.Level.THREAD, Activity.Level.PROCESS,
                 Activity.Level.REQUEST}) {
-            if (!activity.narrowTerms(level).isEmpty()) {
+            if (!line.activityTerms(level).isEmpty()) {
                 levels.add(new RowContextMenu.LevelItem(level, activity.value(level)));
             }
         }
@@ -1918,7 +1927,7 @@ public class LogViewer extends JPanel
         }
         Activity activity = line.resolvedActivity();
         int row = cursorRow.get();
-        return ActivityMenu.build(activityLevels(activity), activity.defaultNarrowLevel(), KeyMap.preferred(),
+        return ActivityMenu.build(activityLevels(line), activity.defaultNarrowLevel(), KeyMap.preferred(),
                 new ActivityRows.Actions() {
                     @Override
                     public void narrowTo(Activity.Level level) {
@@ -3150,15 +3159,25 @@ public class LogViewer extends JPanel
         });
     }
 
-    /** Remove a narrowing or excluded term from the scope; the log reloads at its top row time. */
+    /**
+     * Remove a narrowing or excluded term, or the field filter value a field term shows as, from the scope; the log
+     * reloads at its top row time.
+     */
     public void removeScopeTerm(String term) {
         Scope scope = scopeOrWarn();
         if (scope == null) return;
-        if (term == null || !scope.hasTerm(term)) {
+        if (term == null) {
+            return;
+        }
+        Scope next = FieldTerm.decode(term)
+                .filter(field -> scope.fieldFilters().getOrDefault(field.field(), List.of()).contains(field.value()))
+                .map(field -> scope.withoutFieldValue(field.field(), field.value()))
+                .orElseGet(() -> scope.without(term));
+        if (next.equals(scope)) {
             return;
         }
         leaveEventViews();
-        applyScope(scope.without(term), null, topRowTime(), false);
+        applyScope(next, null, topRowTime(), false);
     }
 
     /**
@@ -3308,7 +3327,7 @@ public class LogViewer extends JPanel
 
     /**
      * Make {@code newScope} the scope: this is a provider generation change. Leaves the
-     * Matches view, ends the search, saves the text terms with the index's field filters,
+     * Matches view, ends the search, saves the text terms and the index's field filters,
      * has the manager drop the loaded log (supersedes in-flight loads, clears the
      * segment cache) and then reloads around {@code targetHit} (exact identity) or
      * {@code target} (time). A narrowed position is highlighted like a jump.
@@ -3318,6 +3337,7 @@ public class LogViewer extends JPanel
         leaveEventViews();
         resetSearchUi();
         saveScopeTerms(newScope);
+        saveFieldFilters(newScope);
         // Cancels the search, supersedes the loads and clears the cache; the reload below jumps.
         searchManager.setScope(newScope);
         refreshScopeChips();
@@ -3362,7 +3382,15 @@ public class LogViewer extends JPanel
             statusBar.setScopeTerms(List.of(), List.of());
             return;
         }
-        statusBar.setScopeTerms(scope.narrow(), scope.exclude());
+        List<String> narrow = new ArrayList<>();
+        scope.fieldFilters().forEach((field, values) -> {
+            for (String value : values) {
+                FieldTerm.of(field, value).filter(term -> !value.isBlank()).map(FieldTerm::encode)
+                        .ifPresent(narrow::add);
+            }
+        });
+        narrow.addAll(scope.narrow());
+        statusBar.setScopeTerms(narrow, scope.exclude());
     }
 
     /** Persist the scope's text terms like field filters; the write happens in the background. */
@@ -3377,6 +3405,25 @@ public class LogViewer extends JPanel
                         log.error("saveScopeTerms: Failed for index '{}'", index, e);
                         invokeLater(() -> failureToast(
                                 "Failed to save scope terms: " + ExceptionMessageFormatter.formatException(e)));
+                    }
+                });
+    }
+
+    /**
+     * Persist the field filters of a guided scope; a manual scope has none to save, so its empty map never
+     * replaces the index's saved filters. The write happens in the background.
+     */
+    private void saveFieldFilters(Scope scope) {
+        if (scope.manualSpl() != null || scope.index() == null || scope.index().isBlank()) {
+            return;
+        }
+        String index = scope.index();
+        searchManager.storeFieldFilters(index, scope.fieldFilters())
+                .whenComplete((ignored, e) -> {
+                    if (e != null) {
+                        log.error("saveFieldFilters: Failed for index '{}'", index, e);
+                        invokeLater(() -> failureToast(
+                                "Failed to save field filters: " + ExceptionMessageFormatter.formatException(e)));
                     }
                 });
     }

@@ -81,6 +81,14 @@ public final class LoadedLogLine implements LogLine, Serializable {
         return activity;
     }
 
+    /**
+     * The field filters and text terms that identify the row's activity at {@code level}; see
+     * {@link ActivityFields#termsFor}.
+     */
+    public ActivityFields.Terms activityTerms(Activity.Level level) {
+        return ActivityExtractor.sourceFields(eventMap, parseObjectOrNull(raw)).termsFor(resolvedActivity(), level);
+    }
+
     /** The parsed {@code _raw} when it is a JSON object, else null. */
     static JsonNode parseObjectOrNull(String raw) {
         if (raw == null) {

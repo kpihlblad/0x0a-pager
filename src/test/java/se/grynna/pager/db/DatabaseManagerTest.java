@@ -269,7 +269,7 @@ class DatabaseManagerTest {
     @Test
     public void differentUsers_haveIsolatedFieldFilters() throws StorageException {
         // User A stores filters
-        dbManager.storeFieldFiltersForIndex("myindex", Map.of("host", "server1"));
+        dbManager.storeFieldFiltersForIndex("myindex", Map.of("host", List.of("server1")));
         dbManager.close();
 
         // User B should see no filters
@@ -279,7 +279,7 @@ class DatabaseManagerTest {
 
         // User A's filters still there
         dbManager = new DatabaseManager("test", "test", "test", tempDir.toFile());
-        assertThat(dbManager.loadFieldFiltersForIndex("myindex")).containsEntry("host", "server1");
+        assertThat(dbManager.loadFieldFiltersForIndex("myindex")).containsEntry("host", List.of("server1"));
     }
 
     @Test
@@ -298,12 +298,12 @@ class DatabaseManagerTest {
     @Test
     public void storingFieldFiltersKeepsTermsAndStoringTermsKeepsFieldFilters() throws StorageException {
         dbManager.storeScopeTermsForIndex("web", new ScopeTerms(List.of("timeout"), List.of()));
-        dbManager.storeFieldFiltersForIndex("web", Map.of("host", "a1"));
+        dbManager.storeFieldFiltersForIndex("web", Map.of("host", List.of("a1", "a2")));
         assertThat(dbManager.loadScopeTermsForIndex("web").narrow()).containsExactly("timeout");
-        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", "a1");
+        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", List.of("a1", "a2"));
 
         dbManager.storeScopeTermsForIndex("web", new ScopeTerms(List.of(), List.of("noise")));
-        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", "a1");
+        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", List.of("a1", "a2"));
         assertThat(dbManager.loadScopeTermsForIndex("web"))
                 .isEqualTo(new ScopeTerms(List.of(), List.of("noise")));
 
@@ -337,16 +337,16 @@ class DatabaseManagerTest {
 
     @Test
     public void storingMessageFieldsKeepsFiltersAndTermsAndTheOthersKeepMessageFields() throws StorageException {
-        dbManager.storeFieldFiltersForIndex("web", Map.of("host", "a1"));
+        dbManager.storeFieldFiltersForIndex("web", Map.of("host", List.of("a1")));
         dbManager.storeScopeTermsForIndex("web", new ScopeTerms(List.of("timeout"), List.of("noise")));
         dbManager.storeMessageFieldsForIndex("web", List.of("title"));
 
-        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", "a1");
+        assertThat(dbManager.loadFieldFiltersForIndex("web")).containsEntry("host", List.of("a1"));
         assertThat(dbManager.loadScopeTermsForIndex("web"))
                 .isEqualTo(new ScopeTerms(List.of("timeout"), List.of("noise")));
         assertThat(dbManager.loadMessageFieldsForIndex("web")).contains(List.of("title"));
 
-        dbManager.storeFieldFiltersForIndex("web", Map.of("host", "a2"));
+        dbManager.storeFieldFiltersForIndex("web", Map.of("host", List.of("a2")));
         dbManager.storeScopeTermsForIndex("web", ScopeTerms.EMPTY);
         assertThat(dbManager.loadMessageFieldsForIndex("web")).contains(List.of("title"));
     }
@@ -367,14 +367,14 @@ class DatabaseManagerTest {
         // Store config data with original password
         dbManager.storeIndexes(new TreeSet<>(Set.of("prod", "staging")));
         dbManager.setLastIndex("prod");
-        dbManager.storeFieldFiltersForIndex("prod", Map.of("env", "production"));
+        dbManager.storeFieldFiltersForIndex("prod", Map.of("env", List.of("production")));
         dbManager.close();
 
         // Re-open with a changed password — config should survive
         dbManager = new DatabaseManager("test", "test", "newpassword", tempDir.toFile());
         assertThat(dbManager.loadIndexes()).containsExactly("prod", "staging");
         assertThat(dbManager.getLastIndex()).isEqualTo("prod");
-        assertThat(dbManager.loadFieldFiltersForIndex("prod")).containsEntry("env", "production");
+        assertThat(dbManager.loadFieldFiltersForIndex("prod")).containsEntry("env", List.of("production"));
     }
 
     @Test
@@ -442,7 +442,7 @@ class DatabaseManagerTest {
         // Instance A owns the stores
         dbManager.storeIndexes(new TreeSet<>(Set.of("idx1")));
         dbManager.setLastIndex("idx1");
-        dbManager.storeFieldFiltersForIndex("idx1", Map.of("host", "h1"));
+        dbManager.storeFieldFiltersForIndex("idx1", Map.of("host", List.of("h1")));
 
         int filesBefore = dbFileCount();
 
@@ -461,7 +461,7 @@ class DatabaseManagerTest {
         dbManager = new DatabaseManager("test", "test", "test", tempDir.toFile());
         assertThat(dbManager.loadIndexes()).containsExactly("idx1");
         assertThat(dbManager.getLastIndex()).isEqualTo("idx1");
-        assertThat(dbManager.loadFieldFiltersForIndex("idx1")).containsEntry("host", "h1");
+        assertThat(dbManager.loadFieldFiltersForIndex("idx1")).containsEntry("host", List.of("h1"));
         assertThat(dbManager.getConfigValue("stillAlive", "")).isEqualTo("yes");
     }
 
@@ -526,7 +526,7 @@ class DatabaseManagerTest {
         dbManager.storeIndexes(new TreeSet<>(Set.of("idx1", "idx2", "idx3")));
         dbManager.setLastIndex("idx2");
         dbManager.setFieldHighlightPatterns("*_pod_name,*_service");
-        dbManager.storeFieldFiltersForIndex("idx1", Map.of("host", "h1", "source", "s1"));
+        dbManager.storeFieldFiltersForIndex("idx1", Map.of("host", List.of("h1"), "source", List.of("s1")));
         dbManager.close();
 
         dbManager = new DatabaseManager("test", "test", "test", tempDir.toFile());

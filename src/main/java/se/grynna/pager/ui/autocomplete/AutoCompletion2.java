@@ -63,8 +63,6 @@ public class AutoCompletion2 extends PlainDocument {
         editorKeyListener = new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
-                if (!comboBox.isDisplayable()) return;
-
                 switch (e.getKeyCode()) {
                     case KeyEvent.VK_ENTER -> {
                         // Confirm selection
@@ -77,14 +75,18 @@ public class AutoCompletion2 extends PlainDocument {
                     }
                     case KeyEvent.VK_ESCAPE -> {
                         // Cancel - hide popup
-                        comboBox.setPopupVisible(false);
+                        if (comboBox.isShowing()) {
+                            comboBox.setPopupVisible(false);
+                        }
                         e.consume();
                     }
                     case KeyEvent.VK_UP -> {
+                        if (!comboBox.isDisplayable()) return;
                         navigateSelection(-1);
                         e.consume();
                     }
                     case KeyEvent.VK_DOWN -> {
+                        if (!comboBox.isDisplayable()) return;
                         if (!comboBox.isPopupVisible()) {
                             comboBox.setPopupVisible(true);
                         }
@@ -92,6 +94,7 @@ public class AutoCompletion2 extends PlainDocument {
                         e.consume();
                     }
                     default -> {
+                        if (!comboBox.isDisplayable()) return;
                         // Show popup when typing
                         if (!comboBox.isPopupVisible() && isPrintableChar(e)) {
                             comboBox.setPopupVisible(true);
@@ -207,7 +210,13 @@ public class AutoCompletion2 extends PlainDocument {
             } finally {
                 updating = false;
             }
-        } else if (!allowCustomValues) {
+        } else if (allowCustomValues) {
+            try {
+                comboBox.setSelectedItem(getText(0, getLength()));
+            } catch (BadLocationException e) {
+                log.error("Error confirming custom text", e);
+            }
+        } else {
             // No valid match in selection mode - beep and restore to first item
             comboBox.getToolkit().beep();
             if (!allItems.isEmpty()) {
@@ -221,12 +230,13 @@ public class AutoCompletion2 extends PlainDocument {
                 }
             }
         }
-        // In custom mode with no match, just keep what user typed
 
         if (editor != null) {
             editor.setCaretPosition(getLength());
         }
-        comboBox.setPopupVisible(false);
+        if (comboBox.isShowing()) {
+            comboBox.setPopupVisible(false);
+        }
     }
 
     /**
@@ -242,6 +252,27 @@ public class AutoCompletion2 extends PlainDocument {
         } finally {
             updating = false;
         }
+    }
+
+    @Override
+    public void replace(int offset, int length, String text, AttributeSet attrs) throws BadLocationException {
+        if (updating || matching) {
+            super.replace(offset, length, text, attrs);
+            return;
+        }
+
+        updating = true;
+        try {
+            if (length > 0) {
+                super.remove(offset, length);
+            }
+            if (text != null && !text.isEmpty()) {
+                super.insertString(offset, text, attrs);
+            }
+        } finally {
+            updating = false;
+        }
+        findMatch();
     }
 
     @Override
@@ -280,11 +311,11 @@ public class AutoCompletion2 extends PlainDocument {
             log.debug("Finding match for pattern: '{}'", pattern);
 
             if (pattern.isEmpty()) {
-                // Empty pattern - match first item
                 currentMatch = allItems.isEmpty() ? null : allItems.getFirst();
-                if (currentMatch != null) {
-                    selectItemQuietly(currentMatch);
-                }
+                return;
+            }
+            if (pattern.startsWith("!")) {
+                currentMatch = null;
                 return;
             }
 

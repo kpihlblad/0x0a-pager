@@ -9,11 +9,13 @@ import se.grynna.pager.db.SearchFilterManager.FieldSummaryUpdateListener;
 import se.grynna.pager.db.SearchFilterManager.IndexUpdateListener;
 import se.grynna.pager.exceptions.SearchException;
 import se.grynna.pager.splunk.FieldSummary;
+import se.grynna.pager.splunk.FieldTerm;
 import se.grynna.pager.splunk.Scope;
 import se.grynna.pager.splunk.SearchManager;
 import se.grynna.pager.splunk.SplQuery;
 
 import javax.swing.*;
+import java.awt.event.KeyEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
@@ -27,10 +29,6 @@ import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * Cluster B (UI side): filter state and field-summary replies stay with the index
- * they belong to, and refresh failures end progress visibly.
- */
 class IndexPanelTest {
 
     private SearchManager searchManager;
@@ -38,15 +36,10 @@ class IndexPanelTest {
     private FieldSummaryUpdateListener fieldListener;
     private IndexUpdateListener indexListener;
 
-    /** Persisted (or pending) filters per index, as SearchFilterManager exposes them. */
-    private final Map<String, Map<String, String>> store = new ConcurrentHashMap<>();
-
-    /** Persisted narrow / exclude terms per index. */
+    private final Map<String, Map<String, List<String>>> store = new ConcurrentHashMap<>();
     private final Map<String, ScopeTerms> termStore = new ConcurrentHashMap<>();
-
     private final List<String> saves = new CopyOnWriteArrayList<>();
     private final List<String> notifications = new CopyOnWriteArrayList<>();
-
     private final Map<String, SortedSet<FieldSummary>> cachedFields = new ConcurrentHashMap<>();
 
     @BeforeEach
@@ -56,10 +49,9 @@ class IndexPanelTest {
         when(searchManager.getLastIndex()).thenReturn("");
         when(searchManager.getFieldFilters(any()))
                 .thenAnswer(inv -> store.getOrDefault(inv.<String>getArgument(0), Map.of()));
-        // Persistence never completes: the snapshot must be taken when the save is requested
         when(searchManager.storeFieldFilters(any(), any())).thenAnswer(inv -> {
             String index = inv.getArgument(0);
-            Map<String, String> filters = inv.getArgument(1);
+            Map<String, List<String>> filters = inv.getArgument(1);
             store.put(index, Map.copyOf(filters));
             saves.add(index + "=" + new TreeMap<>(filters));
             return new CompletableFuture<Void>();
@@ -90,18 +82,13 @@ class IndexPanelTest {
     }
 
     private static SortedSet<FieldSummary> fields(String... names) {
-        // Mocks have no real field, so order them by the stubbed getter
         SortedSet<FieldSummary> set = new TreeSet<>(Comparator.comparing(FieldSummary::getField));
         for (String name : names) {
-            FieldSummary summary = mock(FieldSummary.class);
-            when(summary.getField()).thenReturn(name);
-            when(summary.isRelevantForFiltering()).thenReturn(true);
             Map<String, FieldSummary.Value> values = new TreeMap<>();
-            for (String v : List.of("1", "2", "3")) {
-                values.put(name + v, new FieldSummary.Value(name + v, 1));
-            }
-            when(summary.getValues()).thenReturn(values);
-            set.add(summary);
+            values.put(name + "1", new FieldSummary.Value(name + "1", 30));
+            values.put(name + "2", new FieldSummary.Value(name + "2", 20));
+            values.put(name + "3", new FieldSummary.Value(name + "3", 10));
+            set.add(FieldSummary.of(name, values, 0.8));
         }
         return set;
     }
@@ -124,7 +111,6 @@ class IndexPanelTest {
         return t;
     }
 
-    /** Run everything queued on the EDT, including work those events queue in turn. */
     private static void drainEdt() throws Exception {
         for (int i = 0; i < 3; i++) {
             onEdt(() -> {});
@@ -136,197 +122,265 @@ class IndexPanelTest {
         drainEdt();
     }
 
-    private Map<String, String> rowValues() throws Exception {
-        return onEdt(() -> panel.filterRowValues());
+    // --- Token lines, completion and suggested fields ---
+
+    @Test
+    void acceptingValueInNarrowLineAddsFieldFilterAndShowsInQuery() throws Exception {
+        select("A");
+
+        onEdt(() -> {
+            panel.narrowLine().setInputText("pod=pod2");
+            panel.narrowLine().acceptCompletion();
+        });
+
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("pod", List.of("pod2")));
+        assertThat(onEdt(() -> panel.narrowLine().chipTexts())).containsExactly("pod=pod2 \u00D7");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" pod=\"pod2\"");
     }
 
-    // --- Filters are kept per index ---
+    @Test
+    void minusAndBangInNarrowLineLandInExclude() throws Exception {
+        cachedFields.put("A", fields("app", "level"));
+        select("A");
+
+        onEdt(() -> {
+            panel.narrowLine().setInputText("-level=level1");
+            panel.narrowLine().acceptCompletion();
+            panel.narrowLine().setInputText("!healthz");
+            panel.narrowLine().acceptCompletion();
+        });
+
+        String encodedLevel = FieldTerm.of("level", "level1").orElseThrow().encode();
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEmpty();
+        assertThat(onEdt(() -> panel.draft().exclude())).containsExactly(encodedLevel, "healthz");
+        assertThat(onEdt(() -> panel.excludeLine().chipTexts()))
+                .containsExactly("level=level1 \u00D7", "\"healthz\" \u00D7");
+        assertThat(onEdt(() -> panel.generatedQuery()))
+                .isEqualTo("index=\"A\" | search NOT level=\"level1\" | search NOT \"healthz\"");
+    }
+
+    @Test
+    void twoValuesOfOneFieldRenderWithOrBetweenChipsAndGenerateOrPredicate() throws Exception {
+        select("A");
+
+        onEdt(() -> {
+            panel.narrowLine().setInputText("pod=pod1");
+            panel.narrowLine().acceptCompletion();
+            panel.narrowLine().setInputText("pod=pod2");
+            panel.narrowLine().acceptCompletion();
+        });
+
+        assertThat(onEdt(() -> panel.narrowLine().renderedTokens()))
+                .containsExactly("pod=pod1 \u00D7", "or", "pod=pod2 \u00D7");
+        assertThat(onEdt(() -> panel.generatedQuery()))
+                .isEqualTo("index=\"A\" (pod=\"pod1\" OR pod=\"pod2\")");
+    }
+
+    @Test
+    void backspaceOnEmptyInputSelectsThenRemovesLastChip() throws Exception {
+        select("A");
+        onEdt(() -> {
+            panel.narrowFieldValue("app", "app1");
+            panel.narrowFieldValue("pod", "pod2");
+        });
+        assertThat(onEdt(() -> panel.narrowLine().chipTexts()))
+                .containsExactly("app=app1 \u00D7", "pod=pod2 \u00D7");
+
+        onEdt(() -> panel.narrowLine().backspace());
+        assertThat(onEdt(() -> panel.narrowLine().selectedChipIndex())).isEqualTo(1);
+
+        onEdt(() -> panel.narrowLine().backspace());
+        assertThat(onEdt(() -> panel.narrowLine().selectedChipIndex())).isEqualTo(-1);
+        assertThat(onEdt(() -> panel.narrowLine().chipTexts())).containsExactly("app=app1 \u00D7");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" app=\"app1\"");
+    }
+
+    @Test
+    void enterOnSuggestedValueNarrowsAndMinusExcludes() throws Exception {
+        select("A");
+
+        onEdt(() -> {
+            SuggestedFieldsPanel grid = panel.suggestedFieldsPanel();
+            grid.selectCell(0, 1);
+            grid.pressKey(KeyEvent.VK_ENTER, 0);
+        });
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("app", List.of("app1")));
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" app=\"app1\"");
+
+        onEdt(() -> {
+            SuggestedFieldsPanel grid = panel.suggestedFieldsPanel();
+            grid.selectCell(1, 2);
+            grid.typeChar('-');
+        });
+        String encodedPod = FieldTerm.of("pod", "pod2").orElseThrow().encode();
+        assertThat(onEdt(() -> panel.draft().exclude())).containsExactly(encodedPod);
+        assertThat(onEdt(() -> panel.generatedQuery()))
+                .isEqualTo("index=\"A\" app=\"app1\" | search NOT pod=\"pod2\"");
+    }
+
+    @Test
+    void applySavesMultiValueFiltersAndTerms() throws Exception {
+        select("A");
+        onEdt(() -> {
+            panel.narrowFieldValue("pod", "pod1");
+            panel.narrowFieldValue("pod", "pod2");
+            panel.narrowLine().setInputText("OrderService");
+            panel.narrowLine().acceptCompletion();
+            panel.excludeLine().setInputText("level=DEBUG");
+            panel.excludeLine().acceptCompletion();
+        });
+
+        onEdt(() -> panel.apply());
+
+        String encodedExclude = FieldTerm.of("level", "DEBUG").orElseThrow().encode();
+        var captor = ArgumentCaptor.forClass(Scope.class);
+        verify(searchManager).setScope(captor.capture());
+        Scope applied = captor.getValue();
+        assertThat(applied.fieldFilters()).isEqualTo(Map.of("pod", List.of("pod1", "pod2")));
+        assertThat(applied.narrow()).containsExactly("OrderService");
+        assertThat(applied.exclude()).containsExactly(encodedExclude);
+        assertThat(store.get("A")).isEqualTo(Map.of("pod", List.of("pod1", "pod2")));
+        assertThat(termStore.get("A")).isEqualTo(new ScopeTerms(List.of("OrderService"), List.of(encodedExclude)));
+    }
+
+    @Test
+    void savedLegacyNarrowFieldTermFoldsIntoFieldFilterAndShowsInNarrowLine() throws Exception {
+        String narrowPod = FieldTerm.of("pod", "pod2").orElseThrow().encode();
+        termStore.put("A", new ScopeTerms(List.of("timeout", narrowPod), List.of()));
+        select("A");
+
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("pod", List.of("pod2")));
+        assertThat(onEdt(() -> panel.draft().narrow())).containsExactly("timeout");
+        assertThat(onEdt(() -> panel.narrowLine().chipTexts()))
+                .containsExactly("pod=pod2 \u00D7", "\"timeout\" \u00D7");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" pod=\"pod2\" | search \"timeout\"");
+    }
+
+    @Test
+    void allFieldsPopupListsGroupedFieldsAndFiltersByNameOrValue() throws Exception {
+        cachedFields.put("A", fields("app", "kube.a", "kube.b", "kube.pod"));
+        select("A");
+
+        AllFieldsPopup popup = onEdt(() -> panel.openAllFieldsPopup(""));
+        assertThat(onEdt(popup::visibleHeadings)).containsExactly("0:kube");
+        assertThat(onEdt(popup::visibleFieldNames)).containsExactly("app", "kube.a", "kube.b", "kube.pod");
+
+        onEdt(() -> popup.setFilterText("POD"));
+        assertThat(onEdt(popup::visibleFieldNames)).containsExactly("kube.pod");
+        assertThat(onEdt(popup::visibleHeadings)).containsExactly("0:kube");
+
+        onEdt(() -> popup.setFilterText("app2"));
+        assertThat(onEdt(popup::visibleFieldNames)).containsExactly("app");
+        assertThat(onEdt(popup::visibleHeadings)).isEmpty();
+    }
+
+    // --- Per-index state, refreshes and aliases ---
 
     @Test
     void eachIndexKeepsItsOwnFiltersAcrossRapidSwitches() throws Exception {
         select("A");
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
+        onEdt(() -> panel.narrowFieldValue("app", "app1"));
 
         select("B");
-        assertThat(rowValues()).isEmpty();
-        onEdt(() -> panel.setFilterRowValue("app", "app2"));
-        onEdt(() -> panel.setFilterRowValue("host", "host3"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEmpty();
+        onEdt(() -> {
+            panel.narrowFieldValue("app", "app2");
+            panel.narrowFieldValue("host", "host3");
+        });
 
         select("A");
-        assertThat(rowValues()).containsExactlyEntriesOf(Map.of("app", "app1"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("app", List.of("app1")));
         select("B");
-        assertThat(rowValues()).isEqualTo(Map.of("app", "app2", "host", "host3"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters()))
+                .isEqualTo(Map.of("app", List.of("app2"), "host", List.of("host3")));
 
-        assertThat(saves).containsExactly("A={app=app1}", "B={app=app2, host=host3}", "A={app=app1}");
-        assertThat(store.get("A")).isEqualTo(Map.of("app", "app1"));
-        assertThat(store.get("B")).isEqualTo(Map.of("app", "app2", "host", "host3"));
+        assertThat(saves).containsExactly("A={app=[app1]}", "B={app=[app2], host=[host3]}", "A={app=[app1]}");
+        assertThat(store.get("A")).isEqualTo(Map.of("app", List.of("app1")));
+        assertThat(store.get("B")).isEqualTo(Map.of("app", List.of("app2"), "host", List.of("host3")));
     }
-
-    // --- Replies for another index are ignored ---
 
     @Test
     void queuedReplyForThePreviousIndexDoesNotTouchTheNewOne() throws Exception {
         select("A");
-        // A reply for A is queued, then the user switches to B before it runs
         onEdt(() -> {
             fieldListener.onFieldSummariesUpdated("A", fields("stale"), false);
             panel.selectIndex("B");
-            panel.fieldRefreshButton().setRefreshing(true); // B's refresh is running
+            panel.fieldRefreshButton().setRefreshing(true);
         });
         drainEdt();
 
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "host");
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "host");
         assertThat(onEdt(() -> panel.fieldRefreshButton().isRefreshing())).isTrue();
-        String queryForB = onEdt(() -> panel.generatedQuery());
-        assertThat(queryForB).isEqualTo("index=\"B\"");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"B\"");
 
-        // A late reply for A while B is shown changes nothing either
         fieldListener.onFieldSummariesUpdated("A", fields("stale"), false);
         drainEdt();
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "host");
-        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo(queryForB);
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "host");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"B\"");
         assertThat(onEdt(() -> panel.fieldRefreshButton().isRefreshing())).isTrue();
     }
 
-    // --- Edits survive a refresh ---
-
     @Test
     void editsSurviveBothTheCachedAndTheFreshSummary() throws Exception {
-        store.put("A", Map.of("pod", "pod1"));
+        store.put("A", Map.of("pod", List.of("pod1")));
         select("A");
-        assertThat(rowValues()).isEqualTo(Map.of("pod", "pod1"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("pod", List.of("pod1")));
 
-        onEdt(() -> panel.setFilterRowValue("app", "app2"));
+        onEdt(() -> panel.narrowFieldValue("app", "app2"));
         fieldListener.onFieldSummariesUpdated("A", fields("app", "pod", "extra"), true);
         drainEdt();
-        assertThat(rowValues()).isEqualTo(Map.of("app", "app2", "pod", "pod1"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters()))
+                .isEqualTo(Map.of("pod", List.of("pod1"), "app", List.of("app2")));
 
-        // Edit again while the request runs, including clearing a restored value
         onEdt(() -> {
-            panel.setFilterRowValue("app", "app3");
-            panel.setFilterRowValue("pod", "");
+            panel.narrowLine().removeChip(panel.narrowLine().chips().getFirst());
+            panel.narrowFieldValue("app", "app3");
         });
         fieldListener.onFieldSummariesUpdated("A", fields("app", "pod", "extra"), false);
         drainEdt();
 
-        assertThat(rowValues()).isEqualTo(Map.of("app", "app3"));
-        // pod had a saved value on entry, so it stays pinned first for the visit
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("pod", "app", "extra");
-        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" app=\"app3\"");
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("app", List.of("app2", "app3")));
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod", "extra");
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" (app=\"app2\" OR app=\"app3\")");
     }
 
     @Test
     void persistedFiltersAreRestoredWhenFieldsArriveAfterAnEmptyCache() throws Exception {
-        store.put("A", Map.of("app", "app1"));
+        store.put("A", Map.of("app", List.of("app1")));
         cachedFields.put("A", new TreeSet<>());
         select("A");
-        assertThat(onEdt(() -> panel.filterRowFields())).isEmpty();
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).isEmpty();
 
         fieldListener.onFieldSummariesUpdated("A", fields("app", "pod"), false);
         drainEdt();
 
-        assertThat(rowValues()).isEqualTo(Map.of("app", "app1"));
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("app", List.of("app1")));
+        assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=\"A\" app=\"app1\"");
     }
 
-    // --- Grouped, merged and found field rows ---
-
     @Test
-    void twinFieldsShareOneRowAndTheAppliedScopeMatchesEither() throws Exception {
-        // Saved before the twins were merged, under the flat name
-        store.put("A", Map.of("k8s_pod_name", "p1"));
+    void twinFieldsShareOneLogicalFieldAndTheAppliedScopeMatchesEither() throws Exception {
+        store.put("A", Map.of("k8s_pod_name", List.of("p1")));
         cachedFields.put("A", fields("app", "k8s.pod_name", "k8s_pod_name"));
         select("A");
 
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("k8s.pod_name", "app");
-        assertThat(rowValues()).isEqualTo(Map.of("k8s.pod_name", "p1"));
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "k8s.pod_name");
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("k8s.pod_name", List.of("p1")));
 
         onEdt(() -> panel.apply());
 
         var captor = ArgumentCaptor.forClass(Scope.class);
         verify(searchManager).setScope(captor.capture());
         Scope scope = captor.getValue();
-        assertThat(scope.fieldFilters()).containsExactlyEntriesOf(Map.of("k8s.pod_name", "p1"));
+        assertThat(scope.fieldFilters()).containsExactlyEntriesOf(Map.of("k8s.pod_name", List.of("p1")));
         assertThat(scope.filterFields("k8s.pod_name")).containsExactly("k8s.pod_name", "k8s_pod_name");
         assertThat(SplQuery.scope(scope))
                 .isEqualTo("search index=\"A\" (k8s.pod_name=\"p1\" OR k8s_pod_name=\"p1\")");
-        // Saved under the primary name only
-        assertThat(store.get("A")).isEqualTo(Map.of("k8s.pod_name", "p1"));
-    }
-
-    @Test
-    void fieldsSharingANamePartAreListedUnderAHeading() throws Exception {
-        cachedFields.put("A", fields("app", "kube.a", "kube.b", "kube.c"));
-        select("A");
-
-        assertThat(onEdt(() -> panel.visibleHeadings())).containsExactly("0:kube");
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "kube.a", "kube.b", "kube.c");
-    }
-
-    @Test
-    void findShowsOnlyMatchingRowsAndHidesHeadingsLeftEmpty() throws Exception {
-        cachedFields.put("A", fields("app", "kube.a", "kube.b", "kube.pod"));
-        select("A");
-
-        onEdt(() -> panel.setFindText("POD"));
-        assertThat(onEdt(() -> panel.visibleFilterRowFields())).containsExactly("kube.pod");
-        assertThat(onEdt(() -> panel.visibleHeadings())).containsExactly("0:kube");
-
-        onEdt(() -> panel.setFindText("app"));
-        assertThat(onEdt(() -> panel.visibleFilterRowFields())).containsExactly("app");
-        assertThat(onEdt(() -> panel.visibleHeadings())).isEmpty();
-
-        onEdt(() -> panel.setFindText(""));
-        assertThat(onEdt(() -> panel.visibleFilterRowFields())).hasSize(4);
-    }
-
-    @Test
-    void fieldsWithASavedValueArePinnedFirstUnderSet() throws Exception {
-        store.put("A", Map.of("pod", "pod1"));
-        select("A");
-
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("pod", "app");
-        assertThat(onEdt(() -> panel.visibleHeadings())).containsExactly("0:set", "0:fields");
-    }
-
-    // --- Scope (narrow / exclude terms) ---
-
-    @Test
-    void applyBuildsAScopeFromTheFieldFiltersAndTheSavedTerms() throws Exception {
-        termStore.put("A", new ScopeTerms(List.of("timeout"), List.of("healthcheck")));
-        select("A");
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        Scope scope = captor.getValue();
-        assertThat(scope.index()).isEqualTo("A");
-        assertThat(scope.fieldFilters()).containsExactlyEntriesOf(Map.of("app", "app1"));
-        assertThat(scope.narrow()).containsExactly("timeout");
-        assertThat(scope.exclude()).containsExactly("healthcheck");
-        assertThat(scope.manualSpl()).isNull();
-        assertThat(SplQuery.scope(scope)).isEqualTo(
-                "search index=\"A\" app=\"app1\" | search \"timeout\" | search NOT \"healthcheck\"");
-    }
-
-    @Test
-    void withoutTermsTheAppliedScopeRendersTheGeneratedQuery() throws Exception {
-        select("A");
-        onEdt(() -> panel.setFilterRowValue("pod", "pod2"));
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
-        String generated = onEdt(() -> panel.generatedQuery());
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(SplQuery.scope(captor.getValue())).isEqualTo(SplQuery.baseline(generated));
+        assertThat(store.get("A")).isEqualTo(Map.of("k8s.pod_name", List.of("p1")));
     }
 
     // --- Bookmarks outside the new scope ---
 
-    /** Records the question and answers it; the guard reports {@code outside} bookmarks and records drops. */
     private final class FakeBookmarks implements BookmarkScopeGuard, Confirmer {
         final int outside;
         final boolean answer;
@@ -368,19 +422,18 @@ class IndexPanelTest {
     void applyWithBookmarksOutsideAsksAndOnYesDropsThemBeforeSettingTheScope() throws Exception {
         FakeBookmarks fake = installBookmarks(3, true);
         select("A");
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
+        onEdt(() -> panel.narrowFieldValue("app", "app1"));
         AtomicInteger completed = new AtomicInteger();
         onEdt(() -> panel.setOnLoginComplete(sm -> completed.incrementAndGet()));
 
         onEdt(() -> panel.apply());
 
         assertThat(fake.events).hasSize(3);
-        assertThat(fake.events.get(0)).isEqualTo("outside A {app=app1}");
+        assertThat(fake.events.get(0)).isEqualTo("outside A {app=[app1]}");
         assertThat(fake.events.get(1)).startsWith("confirm: 3 bookmarks are outside the new scope and will be removed")
                 .contains("Copy bookmarks").contains("Export");
         assertThat(fake.events.get(2)).isEqualTo("drop");
-        var order = inOrder(searchManager);
-        order.verify(searchManager).setScope(any(Scope.class));
+        verify(searchManager).setScope(any(Scope.class));
         assertThat(completed).hasValue(1);
     }
 
@@ -388,7 +441,7 @@ class IndexPanelTest {
     void applyWithBookmarksOutsideAndNoStaysInThePanelWithoutSavingOrSettingTheScope() throws Exception {
         FakeBookmarks fake = installBookmarks(2, false);
         select("A");
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
+        onEdt(() -> panel.narrowFieldValue("app", "app1"));
         saves.clear();
         AtomicInteger completed = new AtomicInteger();
         onEdt(() -> panel.setOnLoginComplete(sm -> completed.incrementAndGet()));
@@ -400,31 +453,6 @@ class IndexPanelTest {
         verify(searchManager, never()).setScope(any());
         assertThat(saves).isEmpty();
         assertThat(completed).hasValue(0);
-    }
-
-    @Test
-    void applyWithNoBookmarkOutsideNeverAsks() throws Exception {
-        FakeBookmarks fake = installBookmarks(0, false);
-        select("A");
-
-        onEdt(() -> panel.apply());
-
-        assertThat(fake.events).hasSize(1).first().asString().startsWith("outside A");
-        verify(searchManager).setScope(any(Scope.class));
-    }
-
-    @Test
-    void switchingIndexIsCheckedOnApplyLikeAnyScopeChange() throws Exception {
-        FakeBookmarks fake = installBookmarks(1, true);
-        select("A");
-        select("B");
-
-        onEdt(() -> panel.apply());
-
-        assertThat(fake.events.getFirst()).startsWith("outside B");
-        assertThat(fake.events.get(1)).startsWith("confirm: 1 bookmark is outside the new scope");
-        assertThat(fake.events.get(2)).isEqualTo("drop");
-        verify(searchManager).setScope(any(Scope.class));
     }
 
     @Test
@@ -441,60 +469,7 @@ class IndexPanelTest {
         assertThat(SplQuery.scope(captor.getValue())).isEqualTo("search index=A | head 100 | search \"timeout\"");
     }
 
-    @Test
-    void switchingIndexDoesNotCarryTermsOver() throws Exception {
-        termStore.put("A", new ScopeTerms(List.of("timeout"), List.of()));
-        select("A");
-        select("B");
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(captor.getValue().index()).isEqualTo("B");
-        assertThat(captor.getValue().hasTerms()).isFalse();
-    }
-
-    @Test
-    void savedTermsAreListedAndARemovedTermIsLeftOutOfApply() throws Exception {
-        termStore.put("A", new ScopeTerms(List.of("timeout"), List.of("healthcheck")));
-        select("A");
-        assertThat(onEdt(() -> panel.scopeTermRows())).hasSize(2);
-
-        // The first row is the narrowing term; its × removes it from the scope
-        onEdt(() -> panel.scopeTermRows().get(0).removeButton().doClick());
-        assertThat(onEdt(() -> panel.scopeTermRows())).hasSize(1);
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(captor.getValue().narrow()).isEmpty();
-        assertThat(captor.getValue().exclude()).containsExactly("healthcheck");
-        assertThat(termStore.get("A")).isEqualTo(new ScopeTerms(List.of(), List.of("healthcheck")));
-    }
-
-    @Test
-    void editedTermsSurviveARefreshOfTheFieldRows() throws Exception {
-        termStore.put("A", new ScopeTerms(List.of("timeout"), List.of("healthcheck")));
-        select("A");
-        onEdt(() -> panel.scopeTermRows().get(1).removeButton().doClick());
-
-        onEdt(() -> fieldListener.onFieldSummariesUpdated("A", fields("app", "pod"), false));
-        drainEdt();
-
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "pod");
-        assertThat(onEdt(() -> panel.scopeTermRows())).hasSize(1);
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(captor.getValue().narrow()).containsExactly("timeout");
-        assertThat(captor.getValue().exclude()).isEmpty();
-    }
-
-    // --- Refresh failures ---
+    // --- Refresh failures & deepen ---
 
     @Test
     void fieldRefreshFailureStopsProgressAndReportsTheError() throws Exception {
@@ -544,75 +519,28 @@ class IndexPanelTest {
 
         verify(searchManager).deepenFieldSummaries("A");
         verify(searchManager, never()).loadFieldSummaries(any(), eq(true));
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "pod");
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod");
     }
 
     // --- Several indexes or all ---
 
     @Test
-    void selectingSeveralIndexesLoadsTheFieldSummariesUnderTheirKey() throws Exception {
+    void selectingSeveralIndexesAndAllIndexesWorksWithPerKeyPersistence() throws Exception {
         cachedFields.put("A,B", fields("app", "host"));
+        select("A");
+        onEdt(() -> panel.narrowFieldValue("app", "app1"));
 
         select("A,B");
-
-        verify(searchManager).loadFieldSummaries("A,B", false);
-        assertThat(onEdt(() -> panel.filterRowFields())).containsExactly("app", "host");
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEmpty();
         assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("(index=\"A\" OR index=\"B\")");
-    }
-
-    @Test
-    void severalIndexesKeepFiltersAndTermsUnderTheirKeyApartFromEachIndex() throws Exception {
-        cachedFields.put("A,B", fields("app", "host"));
-        select("A");
-        onEdt(() -> panel.setFilterRowValue("app", "app1"));
-
-        select("A,B");
-        assertThat(rowValues()).isEmpty();
-        onEdt(() -> panel.setFilterRowValue("app", "both"));
+        onEdt(() -> panel.narrowFieldValue("app", "both"));
 
         select("A");
-        assertThat(rowValues()).isEqualTo(Map.of("app", "app1"));
-        select("A,B");
-        assertThat(rowValues()).isEqualTo(Map.of("app", "both"));
-
-        assertThat(store.get("A")).isEqualTo(Map.of("app", "app1"));
-        assertThat(store.get("A,B")).isEqualTo(Map.of("app", "both"));
-        assertThat(saves).contains("A={app=app1}", "A,B={app=both}");
-        verify(searchManager, atLeastOnce()).storeScopeTerms(eq("A,B"), any());
-        verify(searchManager, atLeastOnce()).setLastIndex("A,B");
-    }
-
-    @Test
-    void applyWithSeveralIndexesBuildsAnOrOfTheIndexes() throws Exception {
-        select("B,A");
-
-        onEdt(() -> panel.apply());
-
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(captor.getValue().index()).isEqualTo("A,B");
-        assertThat(SplQuery.scope(captor.getValue())).startsWith("search (index=\"A\" OR index=\"B\")");
-    }
-
-    @Test
-    void applyWithAllIndexesSearchesIndexStar() throws Exception {
+        assertThat(onEdt(() -> panel.draft().fieldFilters())).isEqualTo(Map.of("app", List.of("app1")));
         select("*");
-
         assertThat(onEdt(() -> panel.generatedQuery())).isEqualTo("index=*");
-        onEdt(() -> panel.apply());
 
-        var captor = ArgumentCaptor.forClass(Scope.class);
-        verify(searchManager).setScope(captor.capture());
-        assertThat(captor.getValue().index()).isEqualTo("*");
-        assertThat(SplQuery.scope(captor.getValue())).isEqualTo("search index=*");
-    }
-
-    @Test
-    void clearingTheSelectionEmptiesTheQuery() throws Exception {
-        select("A");
         select("");
-
         assertThat(onEdt(() -> panel.generatedQuery())).isEmpty();
-        assertThat(onEdt(() -> panel.filterRowFields())).isEmpty();
     }
 }

@@ -285,4 +285,36 @@ class ActivityExtractorTest {
         assertThat(ActivityExtractor.extract(NO_FIELDS, null, "plain\n[pid 1:tid 2]"))
                 .isEqualTo(Activity.NONE);
     }
+
+    @Test
+    void sourceFieldsNameTheStructuredFieldEachPartCameFrom() throws Exception {
+        JsonNode json = MAPPER.readTree("""
+                {"kubernetes":{"pod_name":"api-7f9","container_name":"api"},"thread_name":"main","traceId":"4bf9",
+                 "log":"hi"}""");
+
+        ActivityFields fields = ActivityExtractor.sourceFields(NO_FIELDS, json);
+
+        assertThat(fields.machine()).isEqualTo(new ActivityFields.SourceField("kubernetes.pod_name", "api-7f9"));
+        assertThat(fields.processName()).isEqualTo(new ActivityFields.SourceField("kubernetes.container_name", "api"));
+        assertThat(fields.processId()).isNull();
+        assertThat(fields.thread()).isEqualTo(new ActivityFields.SourceField("thread_name", "main"));
+        assertThat(fields.request()).isEqualTo(new ActivityFields.SourceField("traceId", "4bf9"));
+    }
+
+    @Test
+    void sourceFieldsAreNullForPartsSniffedFromTheText() {
+        String text = "<30>1 2024-01-01T10:00:00Z web-1 checkout 4242 - - started";
+        assertThat(ActivityExtractor.extract(NO_FIELDS, null, text).machine()).isEqualTo("web-1");
+
+        assertThat(ActivityExtractor.sourceFields(NO_FIELDS, null)).isEqualTo(new ActivityFields(null, null, null,
+                null, null));
+    }
+
+    @Test
+    void theSplunkHostIsTheMachineFieldWhenNothingStructuredNamesOne() {
+        ActivityFields fields = ActivityExtractor.sourceFields(Map.of("host", "web-2", "app", "checkout"), null);
+
+        assertThat(fields.machine()).isEqualTo(new ActivityFields.SourceField("host", "web-2"));
+        assertThat(fields.processName()).isEqualTo(new ActivityFields.SourceField("app", "checkout"));
+    }
 }

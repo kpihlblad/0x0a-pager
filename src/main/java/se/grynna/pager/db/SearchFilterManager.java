@@ -61,7 +61,7 @@ public class SearchFilterManager {
     private final Map<String, Set<String>> ignoredFields = new ConcurrentHashMap<>();
 
     /** Latest filter snapshot per index that is queued but not yet written. */
-    private final Map<String, Map<String, String>> pendingFilters = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, List<String>>> pendingFilters = new ConcurrentHashMap<>();
     private final Map<String, ScopeTerms> pendingTerms = new ConcurrentHashMap<>();
     /** Empty means the default message fields; the map cannot hold null. */
     private final Map<String, Optional<List<String>>> pendingMessageFields = new ConcurrentHashMap<>();
@@ -392,13 +392,13 @@ public class SearchFilterManager {
      * precedence over the database, so a quick switch back to an index sees its latest
      * filters even before they are persisted.
      */
-    public Map<String, String> getFieldFilters(String index) throws StorageException {
-        Map<String, String> pending = pendingFilters.get(index);
+    public Map<String, List<String>> getFieldFilters(String index) throws StorageException {
+        Map<String, List<String>> pending = pendingFilters.get(index);
         if (pending != null) {
             log.info("getFieldFilters: Using {} pending filters for index='{}'", pending.size(), index);
             return new TreeMap<>(pending);
         }
-        Map<String, String> filters = databaseManager.loadFieldFiltersForIndex(index);
+        Map<String, List<String>> filters = databaseManager.loadFieldFiltersForIndex(index);
         log.info("getFieldFilters: Loaded {} filters for index='{}'", filters.size(), index);
         return filters;
     }
@@ -409,8 +409,8 @@ public class SearchFilterManager {
      *
      * @return completes when the snapshot is written, or exceptionally if it failed
      */
-    public CompletableFuture<Void> storeFieldFilters(String index, Map<String, String> filters) {
-        Map<String, String> snapshot = Map.copyOf(filters);
+    public CompletableFuture<Void> storeFieldFilters(String index, Map<String, List<String>> filters) {
+        Map<String, List<String>> snapshot = copyFilters(filters);
         synchronized (lock) {
             if (closed) {
                 return CompletableFuture.failedFuture(new CancellationException("SearchFilterManager is shut down"));
@@ -420,7 +420,16 @@ public class SearchFilterManager {
         }
     }
 
-    private void writeFieldFilters(String index, Map<String, String> snapshot) {
+    private static Map<String, List<String>> copyFilters(Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> copy = new LinkedHashMap<>(filters.size());
+        filters.forEach((field, values) -> copy.put(field, List.copyOf(values)));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private void writeFieldFilters(String index, Map<String, List<String>> snapshot) {
         try {
             databaseManager.storeFieldFiltersForIndex(index, snapshot);
             log.info("storeFieldFilters: Stored {} filters for index='{}'", snapshot.size(), index);

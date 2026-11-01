@@ -32,10 +32,11 @@ class FieldFiltersTest {
     }
 
     @Test
-    void roundTripWithTerms() throws Exception {
-        FieldFilters in = new FieldFilters(Map.of("host", "web-1"),
+    void roundTripWithTermsAndMultipleValues() throws Exception {
+        FieldFilters in = new FieldFilters(Map.of("host", List.of("web-1", "web-2")),
                 new ScopeTerms(List.of("timeout", "user 42"), List.of("healthcheck")));
         FieldFilters out = roundTrip(in);
+        assertThat(out.getFilterValues()).containsEntry("host", List.of("web-1", "web-2"));
         assertThat(out.getFilters()).containsEntry("host", "web-1");
         assertThat(out.getNarrow()).containsExactly("timeout", "user 42");
         assertThat(out.getExclude()).containsExactly("healthcheck");
@@ -45,7 +46,8 @@ class FieldFiltersTest {
 
     @Test
     void roundTripWithoutTerms() throws Exception {
-        FieldFilters out = roundTrip(new FieldFilters(Map.of("host", "web-1")));
+        FieldFilters out = roundTrip(new FieldFilters(Map.of("host", List.of("web-1"))));
+        assertThat(out.getFilterValues()).containsEntry("host", List.of("web-1"));
         assertThat(out.getFilters()).containsEntry("host", "web-1");
         assertThat(out.getNarrow()).isEmpty();
         assertThat(out.getExclude()).isEmpty();
@@ -60,6 +62,8 @@ class FieldFiltersTest {
             read = (FieldFilters) input.readObject();
         }
         assertThat(read.getFilters()).containsOnly(Map.entry("env", "prod"), Map.entry("host", "web-1"));
+        assertThat(read.getFilterValues())
+                .containsOnly(Map.entry("env", List.of("prod")), Map.entry("host", List.of("web-1")));
         assertThat(read.getNarrow()).isEmpty();
         assertThat(read.getExclude()).isEmpty();
         assertThat(read.terms()).isEqualTo(ScopeTerms.EMPTY);
@@ -74,7 +78,7 @@ class FieldFiltersTest {
     void emptyOnlyWhenNothingIsSaved() {
         assertThat(new FieldFilters().isEmpty()).isTrue();
         assertThat(new FieldFilters(Map.of(), new ScopeTerms(List.of(), List.of("x"))).isEmpty()).isFalse();
-        assertThat(new FieldFilters(Map.of("a", "b"), ScopeTerms.EMPTY).isEmpty()).isFalse();
+        assertThat(new FieldFilters(Map.of("a", List.of("b")), ScopeTerms.EMPTY).isEmpty()).isFalse();
     }
 
     @Test

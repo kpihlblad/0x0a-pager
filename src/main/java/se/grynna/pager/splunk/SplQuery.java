@@ -53,10 +53,20 @@ public final class SplQuery {
      * {@code (a="v" OR b="v")} for several. {@code fields} must not be empty.
      */
     public static String fieldEqualsAny(List<String> fields, String value) {
-        if (fields.size() == 1) {
-            return fieldEquals(fields.get(0), value);
+        return fieldEqualsAny(fields, List.of(value));
+    }
+
+    /**
+     * A predicate that matches when any of {@code fields} equals any of {@code values}: {@link #fieldEquals} for one
+     * field and one value, {@code (a="v1" OR a="v2" OR b="v1" OR b="v2")} for several. Neither list may be empty.
+     */
+    public static String fieldEqualsAny(List<String> fields, List<String> values) {
+        if (fields.size() == 1 && values.size() == 1) {
+            return fieldEquals(fields.get(0), values.get(0));
         }
-        return fields.stream().map(field -> fieldEquals(field, value)).collect(Collectors.joining(" OR ", "(", ")"));
+        return fields.stream()
+                .flatMap(field -> values.stream().map(value -> fieldEquals(field, value)))
+                .collect(Collectors.joining(" OR ", "(", ")"));
     }
 
     /**
@@ -70,6 +80,21 @@ public final class SplQuery {
     }
 
     /**
+     * Render narrowing and excluded terms as pipeline stages: {@code  | search "term"} per narrow term and
+     * {@code  | search NOT "term"} (or {@code field="value"}) per excluded term, or empty when both lists are empty.
+     */
+    public static String termStages(List<String> narrow, List<String> exclude) {
+        StringBuilder stages = new StringBuilder();
+        for (String term : narrow) {
+            stages.append(" | search ").append(termPredicate(term));
+        }
+        for (String term : exclude) {
+            stages.append(" | search NOT ").append(termPredicate(term));
+        }
+        return stages.toString();
+    }
+
+    /**
      * Render a {@link Scope} as the baseline query of the log. The index and field
      * filters (or the manual SPL) come first, exactly as the baseline has always been
      * built; then every narrowing term is its own {@code | search "term"} stage and
@@ -79,15 +104,8 @@ public final class SplQuery {
      * position. A scope without text terms renders to {@link #baseline(String)} of its predicate.
      */
     public static String scope(Scope scope) {
-        StringBuilder query = new StringBuilder(
-                baseline(scope.manualSpl() != null ? scope.manualSpl() : predicate(scope)));
-        for (String term : scope.narrow()) {
-            query.append(" | search ").append(termPredicate(term));
-        }
-        for (String term : scope.exclude()) {
-            query.append(" | search NOT ").append(termPredicate(term));
-        }
-        return query.toString();
+        return baseline(scope.manualSpl() != null ? scope.manualSpl() : predicate(scope))
+                + termStages(scope.narrow(), scope.exclude());
     }
 
     private static String termPredicate(String term) {
@@ -95,8 +113,8 @@ public final class SplQuery {
     }
 
     /**
-     * {@code index="x" field="value" ...}, skipping a blank index and blank values. A field filter with aliases
-     * renders as {@code (field="value" OR alias="value")}.
+     * {@code index="x" field="value" ...}, skipping a blank index and blank values. A field filter with several values
+     * or aliases renders as {@code (field="v1" OR field="v2" OR alias="v1" OR alias="v2")}.
      */
     private static String predicate(Scope scope) {
         StringBuilder predicate = new StringBuilder();
@@ -104,12 +122,13 @@ public final class SplQuery {
         if (!indexPredicate.isEmpty()) {
             predicate.append(indexPredicate);
         }
-        scope.fieldFilters().forEach((field, value) -> {
-            if (value != null && !value.isBlank()) {
+        scope.fieldFilters().forEach((field, values) -> {
+            List<String> nonBlank = values.stream().filter(v -> v != null && !v.isBlank()).toList();
+            if (!nonBlank.isEmpty()) {
                 if (!predicate.isEmpty()) {
                     predicate.append(' ');
                 }
-                predicate.append(fieldEqualsAny(scope.filterFields(field), value));
+                predicate.append(fieldEqualsAny(scope.filterFields(field), nonBlank));
             }
         });
         return predicate.toString();

@@ -41,8 +41,8 @@ public class DarculaColors {
     public static final Color GREEN_ANDROID_TEXT = new Color(0xa4, 0xc6, 0x39);
     public static final Color PURPLE = new Color(189, 147, 249);
     public static final Color RED = new Color(0xc0, 0x25, 0x05);
-    /** Darker, muted Exclude-button fill derived from {@link #RED} in OKLCH. */
-    public static final Color EXCLUDE_RED = excludeRed();
+    /** Light red of the Exclude actions, {@link #RED}'s hue at OKLCH L 0.78: readable on dark backgrounds. */
+    public static final Color EXCLUDE_ACCENT = accent(RED, 0.78f, 0.14f);
     public static final Color PINK = new Color(0xf9, 0x8b, 0x9e);
     public static final Color YELLOW = new Color(221, 220, 110);
     public static final Color CARET = YELLOW;;
@@ -50,6 +50,10 @@ public class DarculaColors {
     public static final Color BLUE_TEXT = new Color(0x40, 0xb6, 0xe0);
     public static final Color BLUE = new Color(0x37, 0x5a, 0x81);
     public static final Color MIDNIGHT_BLUE = new Color(33, 66, 107); //
+    /** Light blue of the Narrow actions, {@link #MIDNIGHT_BLUE}'s hue at OKLCH L 0.80: readable on dark backgrounds. */
+    public static final Color NARROW_ACCENT = accent(MIDNIGHT_BLUE, 0.80f, 0.10f);
+    /** Light blue-grey of the Search action, {@link #COMMENT}'s hue and chroma at OKLCH L 0.78. */
+    public static final Color SEARCH_ACCENT = accent(COMMENT, 0.78f, 0.08f);
     /** Muted dark amber for the Matches view status bar — keeps light text readable on Darcula. */
     public static final Color MATCHES_BAR = new Color(77, 60, 28);
     /** Amber accent of the Matches view: edge stripe and date rules. */
@@ -97,13 +101,10 @@ public class DarculaColors {
     public static final Color G8 = new Color(0xcc, 0xce, 0xda);
     public static final Color G9 = new Color(0xec, 0xee, 0xfa);
 
-    /**
-     * The error red at 60% brightness with 70% of its OKLCH chroma: darker and less saturated, while keeping its
-     * hue so the Exclude action still reads as red.
-     */
-    private static Color excludeRed() {
-        OKLab.LCH darker = OKLab.colorToOklch(new Color(0x99, 0x1d, 0x04));
-        return OKLab.oklchToColor(OKLab.withChroma(darker, darker.C() * 0.7f));
+    /** The hue of {@code source} at the given OKLCH lightness and chroma, clipped into the sRGB gamut. */
+    private static Color accent(Color source, float lightness, float chroma) {
+        OKLab.LCH hue = OKLab.colorToOklch(source);
+        return OKLab.oklchToColor(OKLab.mapToGamut(new OKLab.LCH(lightness, chroma, hue.H())));
     }
 
     private static OKLab.Lab mixOklab(Color from, Color to, float t) {

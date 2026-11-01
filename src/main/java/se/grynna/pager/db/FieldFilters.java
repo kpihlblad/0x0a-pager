@@ -19,7 +19,10 @@ import java.util.TreeMap;
  * the value computed for the class before {@code narrow}/{@code exclude} existed, so
  * records written by older versions still deserialize; the new fields are then
  * {@code null} (no constructor runs), which the accessors read as empty, or as the
- * default message fields for {@code messageFields}.
+ * default message fields for {@code messageFields}. {@code filters} stays populated
+ * with each filter's first value so older versions reading a new record still see one
+ * value per field, while {@code values} holds the full ORed value lists; a record
+ * written before {@code values} existed reads its values from {@code filters}.
  */
 @Data
 @NoArgsConstructor
@@ -27,24 +30,68 @@ public class FieldFilters implements Serializable {
     private static final long serialVersionUID = -9099912745439620526L;
 
     private TreeMap<String, String> filters = new TreeMap<>();
+    @Getter(AccessLevel.NONE)
+    private TreeMap<String, ArrayList<String>> values = new TreeMap<>();
     private ArrayList<String> narrow = new ArrayList<>();
     private ArrayList<String> exclude = new ArrayList<>();
     /** Null when the index uses the default message fields. */
     @Getter(AccessLevel.NONE)
     private ArrayList<String> messageFields;
 
-    public FieldFilters(Map<String, String> filters) {
-        this.filters = filters != null ? new TreeMap<>(filters) : new TreeMap<>();
+    public FieldFilters(Map<String, List<String>> filters) {
+        setFilterValues(filters);
     }
 
-    public FieldFilters(Map<String, String> filters, ScopeTerms terms) {
+    public FieldFilters(Map<String, List<String>> filters, ScopeTerms terms) {
         this(filters);
         setTerms(terms);
     }
 
-    public FieldFilters(Map<String, String> filters, ScopeTerms terms, List<String> messageFields) {
+    public FieldFilters(Map<String, List<String>> filters, ScopeTerms terms, List<String> messageFields) {
         this(filters, terms);
         setMessageFields(messageFields);
+    }
+
+    /** The saved filter values per field; reads from {@code filters} for records written before multi-values existed. */
+    public Map<String, List<String>> getFilterValues() {
+        Map<String, List<String>> result = new TreeMap<>();
+        if (values != null) {
+            values.forEach((field, list) -> {
+                if (field != null && list != null && !list.isEmpty()) {
+                    result.put(field, List.copyOf(list));
+                }
+            });
+        } else if (filters != null) {
+            filters.forEach((field, val) -> {
+                if (field != null && val != null && !val.isBlank()) {
+                    result.put(field, List.of(val));
+                }
+            });
+        }
+        return result;
+    }
+
+    public void setFilterValues(Map<String, List<String>> filterValues) {
+        this.filters = new TreeMap<>();
+        this.values = new TreeMap<>();
+        if (filterValues == null) {
+            return;
+        }
+        filterValues.forEach((field, list) -> {
+            if (field == null || field.isBlank() || list == null) {
+                return;
+            }
+            ArrayList<String> clean = new ArrayList<>(list.size());
+            for (String v : list) {
+                if (v != null && !v.isBlank() && !clean.contains(v)) {
+                    clean.add(v);
+                }
+            }
+            if (!clean.isEmpty()) {
+                this.filters.put(field, clean.get(0));
+                this.values.put(field, clean);
+            }
+        });
     }
 
     /**
@@ -61,15 +108,21 @@ public class FieldFilters implements Serializable {
     }
 
     public void putFilter(String field, String value) {
+        if (values == null) {
+            setFilterValues(getFilterValues());
+        }
         if (value == null || value.trim().isEmpty()) {
             filters.remove(field);
+            values.remove(field);
         } else {
             filters.put(field, value);
+            values.put(field, new ArrayList<>(List.of(value)));
         }
     }
 
     public String getFilter(String field) {
-        return filters.get(field);
+        List<String> list = getFilterValues().get(field);
+        return list == null || list.isEmpty() ? null : list.get(0);
     }
 
     /** Narrowing terms; empty for a record saved before they existed. */
@@ -94,11 +147,11 @@ public class FieldFilters implements Serializable {
 
     /** True when no field filter, text term or message field list is saved. */
     public boolean isEmpty() {
-        return filters.isEmpty() && getNarrow().isEmpty() && getExclude().isEmpty() && messageFields == null;
+        return getFilterValues().isEmpty() && getNarrow().isEmpty() && getExclude().isEmpty() && messageFields == null;
     }
 
     /** Number of field filters. */
     public int size() {
-        return filters.size();
+        return getFilterValues().size();
     }
 }

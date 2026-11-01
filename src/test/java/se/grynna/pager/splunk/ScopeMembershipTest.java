@@ -24,7 +24,7 @@ class ScopeMembershipTest {
     }
 
     private static Scope guided(String index, Map<String, String> filters, List<String> narrow, List<String> exclude) {
-        return new Scope(index, filters, narrow, exclude, null);
+        return Scope.of(index, filters).withTerms(narrow, exclude);
     }
 
     @Test
@@ -81,7 +81,7 @@ class ScopeMembershipTest {
 
     @Test
     void anEventWithOnlyTheAliasFieldWithTheValueIsInside() {
-        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", "p1"), List.of(), List.of(), null,
+        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", List.of("p1")), List.of(), List.of(), null,
                 Map.of("kubernetes.pod_name", List.of("kubernetes_pod_name")));
         assertThat(ScopeMembership.outside(scope, event("x", Map.of("index", "web", "kubernetes_pod_name", "p1"))))
                 .isFalse();
@@ -91,11 +91,18 @@ class ScopeMembershipTest {
 
     @Test
     void anEventWithNeitherTheFieldNorTheAliasWithTheValueIsOutside() {
-        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", "p1"), List.of(), List.of(), null,
+        Scope scope = new Scope("web", Map.of("kubernetes.pod_name", List.of("p1")), List.of(), List.of(), null,
                 Map.of("kubernetes.pod_name", List.of("kubernetes_pod_name")));
         assertThat(ScopeMembership.outside(scope, event("x", Map.of("index", "web", "kubernetes_pod_name", "p2"))))
                 .isTrue();
         assertThat(ScopeMembership.outside(scope, event("x", Map.of("index", "web", "other", "p1")))).isTrue();
+    }
+
+    @Test
+    void aMultiValueFilterMatchesAnyOfItsValues() {
+        Scope scope = Scope.ofValues("web", Map.of("host", List.of("a1", "a2")));
+        assertThat(ScopeMembership.outside(scope, event("x", Map.of("index", "web", "host", "a2")))).isFalse();
+        assertThat(ScopeMembership.outside(scope, event("x", Map.of("index", "web", "host", "a3")))).isTrue();
     }
 
     @Test

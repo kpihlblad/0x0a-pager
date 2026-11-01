@@ -383,7 +383,7 @@ public class SearchManager {
     /**
      * Get saved field filter values for an index.
      */
-    public Map<String, String> getFieldFilters(String index) throws StorageException {
+    public Map<String, List<String>> getFieldFilters(String index) throws StorageException {
         return searchFilterManager.getFieldFilters(index);
     }
 
@@ -392,7 +392,7 @@ public class SearchManager {
      *
      * @return completes when written, or exceptionally if the write failed
      */
-    public CompletableFuture<Void> storeFieldFilters(String index, Map<String, String> filters) {
+    public CompletableFuture<Void> storeFieldFilters(String index, Map<String, List<String>> filters) {
         return searchFilterManager.storeFieldFilters(index, filters);
     }
 

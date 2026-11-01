@@ -11,10 +11,13 @@ import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.MenuElement;
 import javax.swing.MenuSelectionManager;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -51,7 +54,7 @@ class ActivityMenuTest {
     }
 
     @Test
-    void rowsShowTermsWithoutTypeLabelsAndUseMutedOutlines() {
+    void rowsShowTermsWithoutTypeLabelsAndAccentPills() {
         JPopupMenu menu = ActivityMenu.build(ALL_LEVELS, Level.THREAD, KEYS, actions);
 
         List<String> labels = Arrays.stream(menu.getComponents()).map(Container.class::cast)
@@ -59,9 +62,9 @@ class ActivityMenuTest {
                 .map(JLabel.class::cast).map(JLabel::getText).toList();
         assertThat(labels).containsExactly("›", "scheduler-10", "▪", "casbatch-7f9c", "⇄", "4bf92f3577b34da6");
         assertThat(buttons(menu)).allMatch(ActionPill.class::isInstance);
-        assertThat(buttons(menu).stream().map(JButton::getForeground)).containsExactly(DarculaColors.MIDNIGHT_BLUE,
-                DarculaColors.EXCLUDE_RED, DarculaColors.MIDNIGHT_BLUE, DarculaColors.EXCLUDE_RED,
-                DarculaColors.MIDNIGHT_BLUE, DarculaColors.EXCLUDE_RED);
+        assertThat(buttons(menu).stream().map(JButton::getForeground)).containsExactly(DarculaColors.NARROW_ACCENT,
+                DarculaColors.EXCLUDE_ACCENT, DarculaColors.NARROW_ACCENT, DarculaColors.EXCLUDE_ACCENT,
+                DarculaColors.NARROW_ACCENT, DarculaColors.EXCLUDE_ACCENT);
         assertThat(buttons(menu)).allSatisfy(button -> {
             ActionPill pill = (ActionPill) button;
             assertThat(pill.accent()).isEqualTo(pill.getForeground());
@@ -101,6 +104,49 @@ class ActivityMenuTest {
     }
 
     @Test
+    void theRowHasNoBasicMenuMouseHandlerThatWouldArmOrPressIt() {
+        ActivityRows.Row row = firstRow();
+
+        assertThat(row.getMouseListeners()).noneMatch(listener -> isBasicMenuItemHandler(listener));
+        assertThat(row.getMenuDragMouseListeners()).noneMatch(listener -> isBasicMenuItemHandler(listener));
+    }
+
+    @Test
+    void theArmedRowShowsTheFocusedLookOnTheChosenPillOnly() {
+        ActivityRows.Row row = firstRow();
+        ActionPill narrow = (ActionPill) buttons(row).get(0);
+        ActionPill exclude = (ActionPill) buttons(row).get(1);
+
+        row.setArmed(true);
+        assertThat(narrow.hasFocusedLook()).isTrue();
+        assertThat(exclude.hasFocusedLook()).isFalse();
+
+        row.processKeyEvent(new KeyEvent(row, KeyEvent.KEY_PRESSED, 0, 0, KeyEvent.VK_RIGHT, KeyEvent.CHAR_UNDEFINED),
+                new MenuElement[]{row}, MenuSelectionManager.defaultManager());
+        assertThat(narrow.hasFocusedLook()).isFalse();
+        assertThat(exclude.hasFocusedLook()).isTrue();
+
+        row.setArmed(false);
+        assertThat(exclude.hasFocusedLook()).isFalse();
+    }
+
+    @Test
+    void anArmedRowPaintsItsPlainBackgroundNotTheSelection() {
+        ActivityRows.Row row = firstRow();
+        row.setSize(row.getPreferredSize());
+        row.setArmed(true);
+        BufferedImage image = new BufferedImage(row.getWidth(), row.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            row.paint(g);
+        } finally {
+            g.dispose();
+        }
+
+        assertThat(new Color(image.getRGB(0, 0))).isEqualTo(row.getBackground());
+    }
+
+    @Test
     void theRowsShareTheirColumnWidthsSoTheButtonsLineUp() {
         JPopupMenu menu = ActivityMenu.build(ALL_LEVELS, Level.THREAD, KEYS, actions);
 
@@ -133,6 +179,15 @@ class ActivityMenuTest {
     /** The tooltips of every JButton under {@code root}, in order. */
     static List<String> buttonTooltips(Container root) {
         return buttons(root).stream().map(JButton::getToolTipText).toList();
+    }
+
+    private ActivityRows.Row firstRow() {
+        return (ActivityRows.Row) ActivityMenu.build(ALL_LEVELS, Level.THREAD, KEYS, actions).getComponent(0);
+    }
+
+    /** The mouse handler of {@code BasicMenuItemUI}, which arms the item on hover and presses it on release. */
+    private static boolean isBasicMenuItemHandler(Object listener) {
+        return listener.getClass().getName().startsWith("javax.swing.plaf.basic.BasicMenuItemUI");
     }
 
     private static List<JMenuItem> items(JPopupMenu menu) {

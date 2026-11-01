@@ -103,12 +103,13 @@ public final class ScopeMembership {
         return a.indexSelection().sameAs(b.indexSelection());
     }
 
-    private static Map<String, String> changedFilters(Scope current, Scope next) {
-        Map<String, String> changed = new java.util.LinkedHashMap<>();
-        next.fieldFilters().forEach((field, value) -> {
-            if (!value.equals(current.fieldFilters().get(field))
-                    || !next.filterFields(field).equals(current.filterFields(field))) {
-                changed.put(field, value);
+    private static Map<String, List<String>> changedFilters(Scope current, Scope next) {
+        Map<String, List<String>> changed = new java.util.LinkedHashMap<>();
+        next.fieldFilters().forEach((field, values) -> {
+            List<String> curValues = current.fieldFilters().get(field);
+            if (curValues == null || !values.containsAll(curValues)
+                    || !next.filterFields(field).containsAll(current.filterFields(field))) {
+                changed.put(field, values);
             }
         });
         return changed;
@@ -124,15 +125,17 @@ public final class ScopeMembership {
         if (!scope.indexSelection().matches(eventIndex)) {
             return true;
         }
-        for (Map.Entry<String, String> filter : scope.fieldFilters().entrySet()) {
-            String wanted = filter.getValue();
-            if (wanted == null || wanted.isBlank()) {
+        for (Map.Entry<String, List<String>> filter : scope.fieldFilters().entrySet()) {
+            List<Pattern> patterns = filter.getValue().stream()
+                    .filter(v -> v != null && !v.isBlank())
+                    .map(ScopeMembership::glob)
+                    .toList();
+            if (patterns.isEmpty()) {
                 continue;
             }
-            Pattern pattern = glob(wanted);
             boolean matched = fields != null && scope.filterFields(filter.getKey()).stream().anyMatch(field -> {
                 String actual = fields.get(field);
-                return actual != null && pattern.matcher(actual).matches();
+                return actual != null && patterns.stream().anyMatch(pattern -> pattern.matcher(actual).matches());
             });
             if (!matched) {
                 return true;

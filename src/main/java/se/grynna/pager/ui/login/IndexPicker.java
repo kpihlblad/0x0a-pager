@@ -33,7 +33,8 @@ import java.util.function.Consumer;
  * <p>
  * The value is the {@link IndexSelection#key() selection key}. Ticks in the popup change a <em>pending</em>
  * selection which is committed when the popup closes, so a burst of ticks reloads once; a chip's × commits at
- * once. {@code *} and single indexes exclude each other.
+ * once. {@code *} and single indexes exclude each other. A click or Enter ticks (or unticks) an entry and closes
+ * the popup; Ctrl-, Shift- or Meta-click and Space tick and keep it open for picking several.
  * <p>
  * All methods run on the EDT.
  */
@@ -50,6 +51,8 @@ public class IndexPicker extends JComponent {
     private static final String CHECK = "\u2713";
     private static final String UNLISTED_TOOLTIP = "not in the index list";
     private static final String FILTER_PLACEHOLDER = "filter";
+    private static final String MULTI_HINT = "Ctrl/Shift+click or Space: pick several";
+    private static final float HINT_FONT_SIZE = 11f;
 
     private static final Dimension PREFERRED_SIZE = new Dimension(420, 28);
     private static final float CHIP_FONT_SIZE = 12f;
@@ -580,7 +583,11 @@ public class IndexPicker extends JComponent {
                     int row = list.locationToIndex(e.getPoint());
                     if (row >= 0 && list.getCellBounds(row, row).contains(e.getPoint())) {
                         list.setSelectedIndex(row);
-                        toggleCurrent();
+                        if (e.isControlDown() || e.isShiftDown() || e.isMetaDown()) {
+                            toggleCurrent();
+                        } else {
+                            toggleCurrentAndClose();
+                        }
                     }
                 }
             };
@@ -593,8 +600,15 @@ public class IndexPicker extends JComponent {
             scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
             scroll.getVerticalScrollBar().setUnitIncrement(ROW_HEIGHT);
 
+            JLabel hint = new JLabel(MULTI_HINT);
+            hint.setFont(Fontalizer.getFont().deriveFont(HINT_FONT_SIZE));
+            hint.setForeground(DarculaColors.G6);
+            hint.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G3), new EmptyBorder(3, 8, 3, 8)));
+
             add(top, BorderLayout.NORTH);
             add(scroll, BorderLayout.CENTER);
+            add(hint, BorderLayout.SOUTH);
             refresh();
         }
 
@@ -603,7 +617,7 @@ public class IndexPicker extends JComponent {
             bind(KeyEvent.VK_UP, () -> move(-1));
             bind(KeyEvent.VK_PAGE_DOWN, () -> move(MAX_VISIBLE_ROWS));
             bind(KeyEvent.VK_PAGE_UP, () -> move(-MAX_VISIBLE_ROWS));
-            bind(KeyEvent.VK_ENTER, this::toggleCurrent);
+            bind(KeyEvent.VK_ENTER, this::toggleCurrentAndClose);
             // Index names have no space; the typed key is bound so the field does not insert it
             bindStroke(KeyStroke.getKeyStroke(' '), this::toggleCurrent);
             bind(KeyEvent.VK_ESCAPE, IndexPicker.this::closePopup);
@@ -662,11 +676,20 @@ public class IndexPicker extends JComponent {
             }
         }
 
+        /** Tick or untick the current entry and close the popup, which commits the selection. */
+        private void toggleCurrentAndClose() {
+            if (list.getSelectedValue() != null) {
+                toggleCurrent();
+                closePopup();
+            }
+        }
+
         @Override
         public Dimension getPreferredSize() {
             int rows = Math.clamp(model.size(), 1, MAX_VISIBLE_ROWS);
             int top = filterField.getPreferredSize().height + 8;
-            return new Dimension(width, top + 1 + rows * ROW_HEIGHT);
+            int hint = ((JComponent) getComponent(2)).getPreferredSize().height;
+            return new Dimension(width, top + 1 + rows * ROW_HEIGHT + hint);
         }
     }
 

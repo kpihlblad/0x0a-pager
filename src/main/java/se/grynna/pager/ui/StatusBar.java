@@ -342,13 +342,13 @@ public class StatusBar extends JPanel {
         searchExitButton.setVisible(false);
         searchExitButton.addActionListener(e -> logViewer.cancelSearch());
 
-        selectionSearchButton = new ActionPill("Search", DarculaColors.COMMENT, font);
+        selectionSearchButton = new ActionPill("Search", DarculaColors.SEARCH_ACCENT, font);
         selectionSearchButton.setToolTipText(RowContextMenu.searchSelectionText(null));
         selectionSearchButton.setVisible(false);
         selectionSearchButton.addActionListener(e -> logViewer.searchForSelection());
 
         // Fold the selected text, or the active search when there is no selection, into the scope.
-        narrowButton = new ActionPill(RowContextMenu.NARROW_LABEL, DarculaColors.MIDNIGHT_BLUE, font);
+        narrowButton = new ActionPill(RowContextMenu.NARROW_LABEL, DarculaColors.NARROW_ACCENT, font);
         narrowButton.setToolTipText(MenuManager.narrowText(KeyMap.preferred()));
         narrowButton.setVisible(false);
         narrowButton.addActionListener(e -> {
@@ -359,7 +359,7 @@ public class StatusBar extends JPanel {
             }
         });
 
-        excludeButton = new ActionPill(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_RED, font);
+        excludeButton = new ActionPill(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_ACCENT, font);
         excludeButton.setToolTipText(MenuManager.excludeText(KeyMap.preferred()));
         excludeButton.setVisible(false);
         excludeButton.addActionListener(e -> {

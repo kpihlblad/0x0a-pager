@@ -48,6 +48,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -119,6 +120,7 @@ class LogViewerDetailsTest {
         when(searchManager.getActiveSearchSession()).thenAnswer(inv -> session.get());
         when(searchManager.latestSearchableInstant()).thenReturn(T0.plusSeconds(3600));
         when(searchManager.storeScopeTerms(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
+        when(searchManager.storeFieldFilters(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
         when(searchManager.storeMessageFields(any(), any())).thenReturn(CompletableFuture.completedFuture(null));
         when(searchManager.messageFields()).thenAnswer(inv -> messageFields.get());
         when(searchManager.setMessageFields(any())).thenAnswer(inv -> {
@@ -601,10 +603,34 @@ class LogViewerDetailsTest {
 
         onEdt(() -> {
             Scope set = scopeSet();
-            assertThat(set.narrow()).containsExactly(FieldTerm.of("level", "INFO").orElseThrow().encode());
+            assertThat(set.fieldFilters()).containsExactlyEntriesOf(Map.of("level", List.of("INFO")));
+            assertThat(set.narrow()).isEmpty();
             assertThat(set.exclude()).isEmpty();
             assertThat(viewer.isDetailsOpen()).isFalse();
             verify(logProvider).jump(hit(2));
+        });
+    }
+
+    @Test
+    void aNarrowedFieldFilterIsPersistedAndItsChipRemovesIt() throws Exception {
+        onEdt(() -> {
+            viewer.cursorManager().ensureCursorAt(5);
+            viewer.openLogLineDetails(line(5));
+            select("level");
+        });
+        fire(KeyStroke.getKeyStroke(Character.valueOf('+'), 0));
+
+        onEdt(() -> {
+            Scope narrowed = scopeSet();
+            verify(searchManager).storeFieldFilters("web", Map.of("level", List.of("INFO")));
+            scope.set(narrowed);
+
+            viewer.removeScopeTerm(FieldTerm.of("level", "INFO").orElseThrow().encode());
+
+            ArgumentCaptor<Scope> captor = ArgumentCaptor.forClass(Scope.class);
+            verify(searchManager, times(2)).setScope(captor.capture());
+            assertThat(captor.getValue().fieldFilters()).isEmpty();
+            verify(searchManager).storeFieldFilters("web", Map.of());
         });
     }
 

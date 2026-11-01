@@ -10,9 +10,9 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * The scope's text terms in the status row: one chip per
- * narrowing term {@code +"term"} and per excluded term {@code −"term"}, each with a × that
- * removes the term. Hidden while the scope has no text terms. Long terms are elided and
+ * The scope's filters in the status row: one chip per field filter and narrowing term
+ * {@code +"term"} or {@code +field="value"}, and per excluded term {@code −"term"} or {@code −field="value"}, each
+ * with a × that removes it. Hidden while the scope has no filters or terms. Long terms are elided and
  * only the first {@link #MAX_CHIPS} get chips; the rest collapse into {@code +N more}
  * whose tooltip lists them all. Chips are not focusable.
  */

@@ -117,13 +117,15 @@ public final class FieldGrouping {
         return List.of(name.split("[._]", -1));
     }
 
-    private static List<LogicalField> logicalFields(Collection<FieldSummary> summaries) {
+    static List<LogicalField> logicalFields(Collection<FieldSummary> summaries) {
         Map<String, Map<String, Long>> valuesByName = new TreeMap<>();
+        Map<String, Double> relevanceByName = new HashMap<>();
         for (FieldSummary s : summaries) {
             Map<String, Long> values = valuesByName.computeIfAbsent(s.getField(), k -> new TreeMap<>());
             if (s.getValues() != null) {
                 s.getValues().forEach((key, value) -> values.merge(key, value.count(), Long::sum));
             }
+            relevanceByName.merge(s.getField(), s.getRelevance(), Math::max);
         }
 
         Map<List<String>, List<String>> namesByTokens = new HashMap<>();
@@ -134,10 +136,12 @@ public final class FieldGrouping {
         List<LogicalField> logical = new ArrayList<>();
         for (var entry : namesByTokens.entrySet()) {
             SortedMap<String, Long> values = new TreeMap<>();
+            double relevance = 0.0;
             for (String name : entry.getValue()) {
                 valuesByName.get(name).forEach((value, count) -> values.merge(value, count, Long::sum));
+                relevance = Math.max(relevance, relevanceByName.getOrDefault(name, 0.0));
             }
-            logical.add(new LogicalField(entry.getKey(), entry.getValue(), values));
+            logical.add(new LogicalField(entry.getKey(), entry.getValue(), values, relevance));
         }
         logical.sort(Comparator.comparing(LogicalField::tokens, ORDER));
         return logical;
@@ -152,7 +156,7 @@ public final class FieldGrouping {
     }
 
     /** Strips the first {@code depth} tokens from the name; the rest is shown verbatim. */
-    private static String label(String primary, int depth) {
+    static String label(String primary, int depth) {
         int index = -1;
         for (int i = 0; i < depth; i++) {
             index = nextSeparator(primary, index + 1);

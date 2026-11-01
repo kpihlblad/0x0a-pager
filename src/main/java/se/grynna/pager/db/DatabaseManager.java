@@ -488,9 +488,9 @@ public class DatabaseManager {
 
     /**
      * Get field filters for a specific index.
-     * Returns a map of field name to filter value.
+     * Returns a map of field name to filter values.
      */
-    public Map<String, String> loadFieldFiltersForIndex(String index) throws StorageException {
+    public Map<String, List<String>> loadFieldFiltersForIndex(String index) throws StorageException {
         if (index == null || index.trim().isEmpty()) {
             return Map.of();
         }
@@ -499,7 +499,7 @@ public class DatabaseManager {
             FieldFilters fieldFilters = fieldFiltersMap.get("index." + index);
             if (fieldFilters != null) {
                 log.debug("Retrieved {} field filters for index {}", fieldFilters.size(), index);
-                return new TreeMap<>(fieldFilters.getFilters());
+                return new TreeMap<>(fieldFilters.getFilterValues());
             }
             log.debug("No field filters found for index {}", index);
             return Map.of();
@@ -510,11 +510,11 @@ public class DatabaseManager {
 
     /**
      * Set field filters for a specific index.
-     * Persists a map of field name to filter value using object serialization.
+     * Persists a map of field name to filter values using object serialization.
      * The index's saved scope terms are kept; the record is removed only when no
      * field filter and no text term remain.
      */
-    public synchronized void storeFieldFiltersForIndex(String index, Map<String, String> filters)
+    public synchronized void storeFieldFiltersForIndex(String index, Map<String, List<String>> filters)
             throws StorageException {
         if (index == null || index.trim().isEmpty()) {
             return;
@@ -558,7 +558,7 @@ public class DatabaseManager {
 
         try {
             FieldFilters existing = fieldFiltersMap.get("index." + index);
-            Map<String, String> filters = existing != null ? existing.getFilters() : Map.of();
+            Map<String, List<String>> filters = existing != null ? existing.getFilterValues() : Map.of();
             ScopeTerms terms = existing != null ? existing.terms() : ScopeTerms.EMPTY;
             saveScopeRecord(index, new FieldFilters(filters, terms, fieldsOrNullForDefault));
         } catch (Exception e) {
@@ -599,7 +599,7 @@ public class DatabaseManager {
 
         try {
             FieldFilters existing = fieldFiltersMap.get("index." + index);
-            Map<String, String> filters = existing != null ? existing.getFilters() : Map.of();
+            Map<String, List<String>> filters = existing != null ? existing.getFilterValues() : Map.of();
             saveScopeRecord(index, new FieldFilters(filters, terms, messageFieldsOf(existing)));
         } catch (Exception e) {
             throw new StorageException("Error storing scope terms for index " + index, e);
@@ -757,9 +757,26 @@ public class DatabaseManager {
         }
     }
 
+    /**
+     * The cached field summaries of {@code index}. A cache written in a format this version cannot read is dropped
+     * and reads as empty, so the summaries are fetched from Splunk again.
+     */
     public SortedSet<FieldSummary> loadFieldSummaries(String index) {
         MVMap<String, FieldSummary> fields = configStore.openMap(FIELDS + index);
+        try {
+            return new TreeSet<>(fields.values());
+        } catch (MVStoreException | IllegalArgumentException e) {
+            log.info("Dropping unreadable cached field summaries of index '{}': {}", index, rootMessage(e));
+            configStore.removeMap(fields);
+            return new TreeSet<>();
+        }
+    }
 
-        return new TreeSet<>(fields.values());
+    private static String rootMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root.toString();
     }
 }

@@ -57,9 +57,9 @@ class StatusBarSelectionChromeTest {
             assertThat(button("Search").getToolTipText()).isEqualTo("Search for selection \"timeout\"");
             assertThat(button("+ Narrow").getToolTipText()).isEqualTo("Narrow to selection \"timeout\"");
             assertThat(button("− Exclude").getToolTipText()).isEqualTo("Exclude selection \"timeout\"");
-            assertThat(button("Search").getForeground()).isEqualTo(DarculaColors.COMMENT);
-            assertThat(button("+ Narrow").getForeground()).isEqualTo(DarculaColors.MIDNIGHT_BLUE);
-            assertThat(button("− Exclude").getForeground()).isEqualTo(DarculaColors.EXCLUDE_RED);
+            assertThat(button("Search").getForeground()).isEqualTo(DarculaColors.SEARCH_ACCENT);
+            assertThat(button("+ Narrow").getForeground()).isEqualTo(DarculaColors.NARROW_ACCENT);
+            assertThat(button("− Exclude").getForeground()).isEqualTo(DarculaColors.EXCLUDE_ACCENT);
             List<Component> components = flatten(statusBar);
             assertThat(components.indexOf(button("Search"))).isLessThan(components.indexOf(button("+ Narrow")));
             assertThat(components.indexOf(button("+ Narrow"))).isLessThan(components.indexOf(button("− Exclude")));

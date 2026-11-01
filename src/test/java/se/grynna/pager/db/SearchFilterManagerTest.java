@@ -234,15 +234,15 @@ class SearchFilterManagerTest {
     void testFieldFilters() throws Exception {
         // Arrange
         String index = "test_index";
-        Map<String, String> filters = new HashMap<>();
-        filters.put("field1", "value1");
-        filters.put("field2", "value2");
+        Map<String, List<String>> filters = new HashMap<>();
+        filters.put("field1", List.of("value1"));
+        filters.put("field2", List.of("value2"));
 
         when(databaseManager.loadFieldFiltersForIndex(eq(index))).thenReturn(filters);
 
         // Act
         manager.storeFieldFilters(index, filters).get(5, TimeUnit.SECONDS);
-        Map<String, String> result = manager.getFieldFilters(index);
+        Map<String, List<String>> result = manager.getFieldFilters(index);
 
         // Assert
         assertEquals(filters, result);
@@ -726,12 +726,12 @@ class SearchFilterManagerTest {
         doAnswer(inv -> {
             awaitUninterruptibly(release);
             return null;
-        }).when(databaseManager).storeFieldFiltersForIndex(eq("A"), eq(Map.of("app", "1")));
+        }).when(databaseManager).storeFieldFiltersForIndex(eq("A"), eq(Map.of("app", List.of("1"))));
 
-        var first = manager.storeFieldFilters("A", Map.of("app", "1"));
-        var second = manager.storeFieldFilters("A", Map.of("app", "2"));
+        var first = manager.storeFieldFilters("A", Map.of("app", List.of("1")));
+        var second = manager.storeFieldFilters("A", Map.of("app", List.of("2")));
 
-        assertEquals(Map.of("app", "2"), manager.getFieldFilters("A"));
+        assertEquals(Map.of("app", List.of("2")), manager.getFieldFilters("A"));
         verify(databaseManager, never()).loadFieldFiltersForIndex(any());
 
         release.countDown();
@@ -739,11 +739,11 @@ class SearchFilterManagerTest {
         second.get(5, TimeUnit.SECONDS);
 
         var inOrder = inOrder(databaseManager);
-        inOrder.verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", "1"));
-        inOrder.verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", "2"));
+        inOrder.verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", List.of("1")));
+        inOrder.verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", List.of("2")));
 
-        when(databaseManager.loadFieldFiltersForIndex("A")).thenReturn(Map.of("app", "2"));
-        assertEquals(Map.of("app", "2"), manager.getFieldFilters("A"));
+        when(databaseManager.loadFieldFiltersForIndex("A")).thenReturn(Map.of("app", List.of("2")));
+        assertEquals(Map.of("app", List.of("2")), manager.getFieldFilters("A"));
         verify(databaseManager).loadFieldFiltersForIndex("A");
     }
 
@@ -784,8 +784,8 @@ class SearchFilterManagerTest {
             return null;
         }).when(databaseManager).storeFieldFiltersForIndex(eq("A"), any());
 
-        var firstWrite = manager.storeFieldFilters("A", Map.of("app", "1"));
-        var secondWrite = manager.storeFieldFilters("B", Map.of("app", "2"));
+        var firstWrite = manager.storeFieldFilters("A", Map.of("app", List.of("1")));
+        var secondWrite = manager.storeFieldFilters("B", Map.of("app", List.of("2")));
         CompletableFuture<Void> shutdown = CompletableFuture.runAsync(manager::shutdown);
         Thread.sleep(100);
         release.countDown();
@@ -794,8 +794,8 @@ class SearchFilterManagerTest {
         secondWrite.get(5, TimeUnit.SECONDS);
         manager = null;
 
-        verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", "1"));
-        verify(databaseManager).storeFieldFiltersForIndex("B", Map.of("app", "2"));
+        verify(databaseManager).storeFieldFiltersForIndex("A", Map.of("app", List.of("1")));
+        verify(databaseManager).storeFieldFiltersForIndex("B", Map.of("app", List.of("2")));
     }
 
     private static void await(AtomicBoolean flag) {

@@ -1,21 +1,28 @@
 package se.grynna.pager.ui;
 
+import com.formdev.flatlaf.ui.FlatMenuItemUI;
 import se.grynna.pager.splunk.Activity;
 import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.MenuSelectionManager;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.event.MenuDragMouseEvent;
+import javax.swing.event.MenuDragMouseListener;
 import javax.swing.event.MenuKeyEvent;
 import javax.swing.event.MenuKeyListener;
+import javax.swing.event.MouseInputAdapter;
+import javax.swing.event.MouseInputListener;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -30,9 +37,9 @@ import java.util.List;
  *
  * <p>
  * Each row is a {@link JMenuItem}, so the popup's own keyboard navigation reaches it: Up/Down select a row,
- * Left/Right choose its Narrow or Exclude button (shown as hovered), Enter presses the chosen one, Esc closes. A
- * click on a button presses it; a click elsewhere on the row presses the chosen one (Narrow unless Left/Right chose
- * Exclude). Built apart from showing it, so it runs headless.
+ * Left/Right choose its Narrow or Exclude button (shown with the focused look), Enter presses the chosen one, Esc
+ * closes. Only the buttons respond to the mouse: hovering or clicking the labels or the gaps of a row does nothing,
+ * and a row never paints a selection background. Built apart from showing it, so it runs headless.
  */
 public final class ActivityRows {
 
@@ -138,8 +145,8 @@ public final class ActivityRows {
                     label(RowContextMenu.elide(value), DarculaColors.FOREGROUND)};
             // On the row, not the label: a label with a tooltip would take the row's clicks.
             setToolTipText(value);
-            narrow = button(RowContextMenu.NARROW_LABEL, DarculaColors.MIDNIGHT_BLUE, narrowTooltip, narrowAction);
-            exclude = button(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_RED, excludeTooltip, excludeAction);
+            narrow = button(RowContextMenu.NARROW_LABEL, DarculaColors.NARROW_ACCENT, narrowTooltip, narrowAction);
+            exclude = button(RowContextMenu.EXCLUDE_LABEL, DarculaColors.EXCLUDE_ACCENT, excludeTooltip, excludeAction);
 
             GridBagConstraints c = new GridBagConstraints();
             c.anchor = GridBagConstraints.WEST;
@@ -188,15 +195,31 @@ public final class ActivityRows {
         }
 
         @Override
-        public void menuSelectionChanged(boolean isIncluded) {
-            super.menuSelectionChanged(isIncluded);
+        public void setArmed(boolean armed) {
+            super.setArmed(armed);
             showChoice();
         }
 
         private void showChoice() {
             boolean armed = isArmed();
-            narrow.getModel().setRollover(armed && !excludeChosen);
-            exclude.getModel().setRollover(armed && excludeChosen);
+            narrow.setFocusedLook(armed && !excludeChosen);
+            exclude.setFocusedLook(armed && excludeChosen);
+        }
+
+        @Override
+        public void updateUI() {
+            setUI(new RowUI());
+        }
+
+        /** An armed row paints its plain background, so only the focused button shows the selection. */
+        @Override
+        protected void paintComponent(Graphics g) {
+            if (isArmed()) {
+                g.setColor(getBackground());
+                g.fillRect(0, 0, getWidth(), getHeight());
+            } else {
+                super.paintComponent(g);
+            }
         }
 
         /** The layout's size: the menu item UI would size the item by its (empty) text. */
@@ -229,6 +252,35 @@ public final class ActivityRows {
                 action.run();
             });
             return button;
+        }
+
+        /**
+         * The menu item UI without its mouse handling: the basic UI arms and clicks the item on hover and release.
+         * Keyboard handling is kept.
+         */
+        private static final class RowUI extends FlatMenuItemUI {
+
+            @Override
+            protected MouseInputListener createMouseInputListener(JComponent c) {
+                return new MouseInputAdapter() {};
+            }
+
+            @Override
+            protected MenuDragMouseListener createMenuDragMouseListener(JComponent c) {
+                return new MenuDragMouseListener() {
+                    @Override
+                    public void menuDragMouseDragged(MenuDragMouseEvent e) {}
+
+                    @Override
+                    public void menuDragMouseEntered(MenuDragMouseEvent e) {}
+
+                    @Override
+                    public void menuDragMouseExited(MenuDragMouseEvent e) {}
+
+                    @Override
+                    public void menuDragMouseReleased(MenuDragMouseEvent e) {}
+                };
+            }
         }
     }
 }

@@ -39,6 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -215,6 +217,24 @@ class LogViewerNarrowTest {
             viewer.narrowToCursorActivity();
 
             assertThat(scopeSet().narrow()).containsExactly("t1");
+        });
+    }
+
+    @Test
+    void aStructuredProcessNarrowsByItsFieldsNotByText() throws Exception {
+        LoadedLogLine k8s = jsonLine(3, """
+                {"kubernetes":{"pod_name":"api-7f9","container_name":"api"},"log":"hi"}""");
+        doReturn(k8s).when(logProvider).getLine(eq(3), anyBoolean());
+        doReturn(Optional.of(k8s)).when(logProvider).peekLine(3);
+        onEdt(() -> {
+            viewer.cursorManager().ensureCursorAt(3);
+
+            viewer.narrowToCursorActivity();
+
+            assertThat(scopeSet().fieldFilters())
+                    .isEqualTo(Map.of("kubernetes.pod_name", List.of("api-7f9"),
+                            "kubernetes.container_name", List.of("api")));
+            assertThat(scopeSet().narrow()).isEmpty();
         });
     }
 
@@ -768,6 +788,13 @@ class LogViewerNarrowTest {
                 "raw", time, time, "message " + row, CONTINUATION[row], Level.INFO);
         line.setActivity(ACTIVITY[row]);
         return line;
+    }
+
+    /** A JSON event on row {@code row}, without a stored activity: the activity is extracted from {@code raw}. */
+    private static LoadedLogLine jsonLine(int row, String raw) {
+        Instant time = T0.plusSeconds(10L * EVENT_OF_ROW[row]);
+        return new LoadedLogLine(MsgType.JSON, "seg", row, "cb" + EVENT_OF_ROW[row], "bkt", time, raw, time, time, "hi",
+                false, Level.INFO);
     }
 
     /** The event-level line of the event that row {@code row} belongs to, as the Matches and Bookmarks views hold it. */

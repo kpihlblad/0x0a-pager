@@ -92,13 +92,7 @@ public final class ActivityExtractor {
      * @return the activity, never null ({@link Activity#NONE} when nothing is known)
      */
     public static Activity extract(Map<String, String> splunkFields, JsonNode json, String text, String raw) {
-        FieldIndex fields = new FieldIndex();
-        if (json != null && json.isObject()) {
-            flatten(json, "", fields);
-        }
-        if (splunkFields != null) {
-            addSplunkFields(splunkFields, fields);
-        }
+        FieldIndex fields = index(splunkFields, json);
         Slots slots = new Slots();
         slots.offerMachine(fields.find(MACHINE));
         slots.offerProcessName(fields.find(PROCESS_NAME));
@@ -124,6 +118,38 @@ public final class ActivityExtractor {
         }
         String processTerm = processTerm(raw, process, slots.processId, machine, slots.processName);
         return new Activity(machine, process, thread, request, origin, processTerm);
+    }
+
+    /**
+     * The structured field each activity slot was taken from, with the name as written; a slot sniffed from text has
+     * none. Uses the same inputs and lookups as {@link #extract(Map, JsonNode, String, String)}. The machine falls
+     * back to the Splunk {@code host} field.
+     *
+     * @param splunkFields the event's Splunk fields (may be null)
+     * @param json         the parsed {@code _raw} when it is a JSON object, else null
+     */
+    public static ActivityFields sourceFields(Map<String, String> splunkFields, JsonNode json) {
+        FieldIndex fields = index(splunkFields, json);
+        ActivityFields.SourceField machine = fields.findField(MACHINE);
+        if (machine == null && splunkFields != null) {
+            String host = clean(splunkFields.get("host"));
+            if (host != null) {
+                machine = new ActivityFields.SourceField("host", host);
+            }
+        }
+        return new ActivityFields(machine, fields.findField(PROCESS_NAME), fields.findField(PROCESS_ID),
+                fields.findField(THREAD), fields.findField(REQUEST));
+    }
+
+    private static FieldIndex index(Map<String, String> splunkFields, JsonNode json) {
+        FieldIndex fields = new FieldIndex();
+        if (json != null && json.isObject()) {
+            flatten(json, "", fields);
+        }
+        if (splunkFields != null) {
+            addSplunkFields(splunkFields, fields);
+        }
+        return fields;
     }
 
     /**
@@ -420,8 +446,8 @@ public final class ActivityExtractor {
      * paths always take precedence over last-segment matches.
      */
     private static final class FieldIndex {
-        private final Map<String, String> byPath = new HashMap<>();
-        private final Map<String, String> byLeaf = new HashMap<>();
+        private final Map<String, ActivityFields.SourceField> byPath = new HashMap<>();
+        private final Map<String, ActivityFields.SourceField> byLeaf = new HashMap<>();
 
         void add(String path, String value) {
             int dot = path.lastIndexOf('.');
@@ -433,23 +459,29 @@ public final class ActivityExtractor {
             if (cleaned == null) {
                 return;
             }
-            byPath.putIfAbsent(normalize(path), cleaned);
+            ActivityFields.SourceField field = new ActivityFields.SourceField(path, cleaned);
+            byPath.putIfAbsent(normalize(path), field);
             if (dot >= 0) {
-                byLeaf.putIfAbsent(normalize(leaf), cleaned);
+                byLeaf.putIfAbsent(normalize(leaf), field);
             }
         }
 
         String find(List<String> candidates) {
+            ActivityFields.SourceField field = findField(candidates);
+            return field == null ? null : field.value();
+        }
+
+        ActivityFields.SourceField findField(List<String> candidates) {
             for (String name : candidates) {
-                String value = byPath.get(name);
-                if (value != null) {
-                    return value;
+                ActivityFields.SourceField field = byPath.get(name);
+                if (field != null) {
+                    return field;
                 }
             }
             for (String name : candidates) {
-                String value = byLeaf.get(name);
-                if (value != null) {
-                    return value;
+                ActivityFields.SourceField field = byLeaf.get(name);
+                if (field != null) {
+                    return field;
                 }
             }
             return null;
