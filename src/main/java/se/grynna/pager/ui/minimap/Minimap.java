@@ -2,6 +2,7 @@ package se.grynna.pager.ui.minimap;
 
 import se.grynna.pager.ui.Glow;
 import se.grynna.pager.utils.DarculaColors;
+import se.grynna.pager.utils.Theme;
 
 import javax.swing.*;
 import java.awt.*;
@@ -39,14 +40,6 @@ public final class Minimap extends JComponent {
     /** How far left of the strip the hit area reaches: the strip is thin. */
     public static final int HIT_MARGIN = 3;
 
-    private static final Color MATCH = DarculaColors.MATCHES_ACCENT;
-    private static final Color EDGE_CAP = DarculaColors.MATCHES_ACCENT_DIM;
-    /** Fill of the shaded bands (odd day, week, month or year); the others stay clear. Subtle, under the amber. */
-    private static final Color DAY_BAND = new Color(DarculaColors.GREY.getRed(), DarculaColors.GREY.getGreen(),
-            DarculaColors.GREY.getBlue(), 60);
-    private static final Color BOOKMARK = DarculaColors.BOOKMARK;
-    /** Blue-white of the visible range: the outline, its fill and its glow. */
-    private static final Color GLOW = new Color(200, 228, 255);
     private static final float GLOW_PEAK = 0.55f;
     private static final float GLOW_INNER = 0.18f;
 
@@ -54,8 +47,8 @@ public final class Minimap extends JComponent {
     record Data(MinimapModel.Span span, long[] matches, long[] bookmarks, long[] dateChanges,
             OptionalLong firstEpochDay, boolean capEarlier, boolean capLater) {}
 
-    /** The glow is cached per visible-range height and strip width. */
-    private record GlowKey(int rectHeight, int stripWidth) {}
+    /** The glow is cached per visible-range height, strip width and theme. */
+    private record GlowKey(int rectHeight, int stripWidth, Theme theme) {}
 
     private Data data;
     private MinimapModel.Span visible;
@@ -216,7 +209,7 @@ public final class Minimap extends JComponent {
             if (shown.capLater()) {
                 paintCap(g2, h - 1, stripWidth);
             }
-            g2.setColor(BOOKMARK);
+            g2.setColor(DarculaColors.BOOKMARK);
             for (int y : model.bookmarkYs()) {
                 g2.fillRect(0, y, stripWidth, 1);
             }
@@ -234,9 +227,9 @@ public final class Minimap extends JComponent {
         int y1 = m.visibleToY();
         int rectHeight = y1 - y0;
         g2.drawImage(glow(rectHeight, stripWidth), -GLOW_REACH, y0 - GLOW_REACH, null);
-        g2.setColor(alpha(GLOW, GLOW_INNER));
+        g2.setColor(alpha(DarculaColors.GLOW, GLOW_INNER));
         g2.fillRect(0, y0, stripWidth, rectHeight);
-        g2.setColor(GLOW);
+        g2.setColor(DarculaColors.GLOW);
         g2.fillRect(0, y0, stripWidth, 1);
         g2.fillRect(0, y1 - 1, stripWidth, 1);
         g2.fillRect(0, y0, 1, rectHeight);
@@ -244,7 +237,7 @@ public final class Minimap extends JComponent {
     }
 
     private BufferedImage glow(int rectHeight, int stripWidth) {
-        GlowKey key = new GlowKey(rectHeight, stripWidth);
+        GlowKey key = new GlowKey(rectHeight, stripWidth, DarculaColors.theme());
         if (!key.equals(glowKey)) {
             glow = renderGlow(rectHeight, stripWidth);
             glowKey = key;
@@ -258,7 +251,7 @@ public final class Minimap extends JComponent {
      * {@link Glow#render}), cropped to the left, top and bottom: the strip has nothing to its right.
      */
     static BufferedImage renderGlow(int rectHeight, int stripWidth) {
-        BufferedImage full = Glow.render(stripWidth, rectHeight, GLOW_REACH, GLOW, GLOW_PEAK);
+        BufferedImage full = Glow.render(stripWidth, rectHeight, GLOW_REACH, DarculaColors.GLOW, GLOW_PEAK);
         return full.getSubimage(0, 0, GLOW_REACH + stripWidth, rectHeight + 2 * GLOW_REACH);
     }
 
@@ -268,7 +261,7 @@ public final class Minimap extends JComponent {
 
     /** The shaded day, week, month or year bands, solid across the full width. */
     private static void paintDays(Graphics2D g2, MinimapModel m, int w) {
-        g2.setColor(DAY_BAND);
+        g2.setColor(DarculaColors.GREY_BAND);
         for (MinimapModel.Band band : m.shadedBands()) {
             g2.fillRect(0, band.top(), w, band.bottom() - band.top());
         }
@@ -283,14 +276,14 @@ public final class Minimap extends JComponent {
             }
             int y0 = (int) ((long) i * h / count);
             int y1 = (int) ((long) (i + 1) * h / count);
-            g2.setColor(new Color(MATCH.getRed(), MATCH.getGreen(), MATCH.getBlue(),
-                    Math.round(255 * alphas[i])));
+            Color match = DarculaColors.MATCHES_ACCENT;
+            g2.setColor(new Color(match.getRed(), match.getGreen(), match.getBlue(), Math.round(255 * alphas[i])));
             g2.fillRect(0, y0, w, Math.max(1, y1 - y0));
         }
     }
 
     private static void paintCap(Graphics2D g2, int y, int w) {
-        g2.setColor(EDGE_CAP);
+        g2.setColor(DarculaColors.MATCHES_ACCENT_DIM);
         for (int x = 0; x < w; x += 4) {
             g2.fillRect(x, y, Math.min(2, w - x), 1);
         }

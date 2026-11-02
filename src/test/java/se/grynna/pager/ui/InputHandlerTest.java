@@ -669,6 +669,63 @@ class InputHandlerTest {
         verify(harness.viewPort(), never()).showMatchInLog();
     }
 
+    // === Double-tap Tab selects the region under the cursor ===
+
+    @Test
+    void aDoubleTapSelectsTheRegionUnderTheCursor() throws Exception {
+        var now = new AtomicLong(0);
+        Harness harness = cursorHarness(false, false, now);
+        harness.cursorManager().ensureCursorAt(0);
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        now.set(100);
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        flushEdt();
+
+        verify(harness.cursorManager(), times(1)).selectRegionAtCursor();
+    }
+
+    @Test
+    void aSingleTapDoesNothing() throws Exception {
+        Harness harness = cursorHarness(false, false, new AtomicLong(0));
+        harness.cursorManager().ensureCursorAt(0);
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        flushEdt();
+
+        verify(harness.cursorManager(), never()).selectRegionAtCursor();
+    }
+
+    @Test
+    void tapsSeparatedByTheDoubleClickIntervalAreTwoSingleTaps() throws Exception {
+        var now = new AtomicLong(0);
+        Harness harness = cursorHarness(false, false, now);
+        harness.cursorManager().ensureCursorAt(0);
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        now.set(5_000);
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        flushEdt();
+
+        verify(harness.cursorManager(), never()).selectRegionAtCursor();
+    }
+
+    @Test
+    void anotherKeyBetweenTheTapsDisarmsTheDoubleTap() throws Exception {
+        var now = new AtomicLong(0);
+        Harness harness = cursorHarness(false, false, now);
+        harness.cursorManager().ensureCursorAt(0);
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        now.set(100);
+        fire(harness, typed('a'));
+        now.set(200);
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0));
+        flushEdt();
+
+        verify(harness.cursorManager(), never()).selectRegionAtCursor();
+    }
+
     // === Esc twice ends an active search ===
 
     @Test

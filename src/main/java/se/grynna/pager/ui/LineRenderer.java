@@ -269,6 +269,9 @@ public class LineRenderer {
                     display.addAttribute(TextAttribute.FOREGROUND, textColor, preambleEnd, text.length());
                 }
 
+                // Apply inline message style spans (welcome/help screen colours and bold) before highlights and selection.
+                applyStyleSpans(display, text.length(), line.getPreambleEnd(), horizontalScroll, line.getStyleSpans());
+
                 // Apply text highlights (selection echo, search matches, etc.)
                 // Applied before primary selection so that the selection colour takes precedence.
                 applyTextHighlights(display, text, line.getHighlights());
@@ -416,19 +419,22 @@ public class LineRenderer {
             case GapRule.Gap(var duration) -> {
                 g2d.setColor(viewAccentDim());
                 g2d.drawLine(renderArea.x, y, renderArea.x + renderArea.width, y);
-                drawRuleLabel(g2d, DurationText.shortText(duration) + " later", COMMENT, viewTint(), y,
+                drawRuleLabel(g2d, DurationText.shortText(duration) + " later", COMMENT, viewTint(), y, 1,
                         textEndX, prevTextEndX, false);
             }
             case GapRule.Date(var date) -> {
+                int thickness;
                 if (denseDates) {
                     Color accent = viewAccent();
                     g2d.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 128));
                     g2d.drawLine(renderArea.x, y, renderArea.x + renderArea.width, y);
+                    thickness = 1;
                 } else {
                     g2d.setColor(viewAccent());
                     g2d.fillRect(renderArea.x, y, renderArea.width, 2);
+                    thickness = 2;
                 }
-                drawRuleLabel(g2d, RULE_DATE_FORMAT.format(date), BACKGROUND, viewAccent(), y, textEndX,
+                drawRuleLabel(g2d, RULE_DATE_FORMAT.format(date), BACKGROUND, viewAccent(), y, thickness, textEndX,
                         prevTextEndX, true);
             }
             case GapRule.None none -> {
@@ -442,16 +448,16 @@ public class LineRenderer {
      * previous row leaves room, else not at all. The first painted row has no previous row, so its
      * label is left out when this row's text reaches it (the status bar shows the first row's time).
      */
-    private void drawRuleLabel(Graphics2D g2d, String text, Color textColor, Color fill, int y, int textEndX,
-            Integer prevTextEndX, boolean dateTag) {
+    private void drawRuleLabel(Graphics2D g2d, String text, Color textColor, Color fill, int y, int ruleThickness,
+            int textEndX, Integer prevTextEndX, boolean dateTag) {
         int width = fontMetrics.stringWidth(text);
         int x = renderArea.x + renderArea.width - width - RULE_LABEL_PADDING;
         int tagHeight = charSize.height() - 2;
         int tagTop;
         if (labelFits(x, textEndX)) {
-            tagTop = y + 2;
+            tagTop = y + ruleThickness;
         } else if (prevTextEndX != null && labelFits(x, prevTextEndX) && y >= charSize.height()) {
-            tagTop = y - tagHeight - 1;
+            tagTop = y - tagHeight;
         } else {
             return;
         }
@@ -470,6 +476,36 @@ public class LineRenderer {
 
     static boolean labelFits(int labelX, int textEndX) {
         return labelX - 2 * RULE_LABEL_PADDING >= textEndX;
+    }
+
+    /**
+     * Applies precomputed foreground and bold spans (in 0-based message coordinates) onto the
+     * horizontally scrolled display text without allocating in the paint loop.
+     */
+    private void applyStyleSpans(AttributedString display, int textLength, int preambleEnd, int horizontalScroll,
+            java.util.List<StyleSpan> spans) {
+        if (spans == null || spans.isEmpty()) {
+            return;
+        }
+        int msgOffset = preambleEnd - horizontalScroll;
+        int minIdx = max(0, msgOffset);
+        Font boldFont = Fontalizer.getBoldFont();
+        for (int i = 0, n = spans.size(); i < n; i++) {
+            StyleSpan span = spans.get(i);
+            int from = max(minIdx, msgOffset + span.start());
+            int to = min(textLength, msgOffset + span.end());
+            if (from < to) {
+                if (span.bold()) {
+                    display.addAttribute(TextAttribute.FONT, boldFont, from, to);
+                }
+                if (span.foreground() != null) {
+                    Color color = span.foreground().get();
+                    if (color != null) {
+                        display.addAttribute(TextAttribute.FOREGROUND, color, from, to);
+                    }
+                }
+            }
+        }
     }
 
     /**

@@ -209,6 +209,11 @@ final class ViewTabs extends JComponent {
                 : tooltipOf(tab, KeyMap.preferred());
     }
 
+    @Override
+    public Point getToolTipLocation(MouseEvent event) {
+        return InWindowToolTip.locationFor(this, event);
+    }
+
     static String tooltipOf(Tab tab, KeyMap keys) {
         return switch (tab) {
             case LOG -> "Back to the log (" + keys.label(UiAction.CANCEL) + ")";

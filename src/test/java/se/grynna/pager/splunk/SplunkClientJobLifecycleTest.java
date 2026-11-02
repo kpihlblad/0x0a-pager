@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -47,6 +49,7 @@ class SplunkClientJobLifecycleTest {
 
     private MockWebServer server;
     private FakeSplunk splunk;
+    private AtomicReference<Instant> now;
     private TestClient client;
 
     /** Client without a real connect; reconnects (relogin) keep the fake service. */
@@ -57,9 +60,14 @@ class SplunkClientJobLifecycleTest {
             super(Clock.systemUTC());
         }
 
+        TestClient(Clock clock) {
+            super(clock);
+        }
+
         @Override
         void reconnect(String newPassword) {
             reconnects.incrementAndGet();
+            recordActivity();
         }
     }
 
@@ -80,6 +88,8 @@ class SplunkClientJobLifecycleTest {
         final List<String> createdIds = new CopyOnWriteArrayList<>();
         final List<String> cancelRequests = new CopyOnWriteArrayList<>();
         final List<String> confirmedCancels = new CopyOnWriteArrayList<>();
+        final AtomicInteger keepAlives = new AtomicInteger();
+        volatile int keepAliveStatus = 200;
         /** Creates and confirmed cancels in the order Splunk saw them. */
         final List<String> timeline = new CopyOnWriteArrayList<>();
         final Set<String> existing = ConcurrentHashMap.newKeySet();
@@ -95,6 +105,12 @@ class SplunkClientJobLifecycleTest {
         public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
             String path = request.getPath();
             String method = request.getMethod();
+            if ("GET".equals(method) && "/services/authentication/current-context".equals(path)) {
+                keepAlives.incrementAndGet();
+                return keepAliveStatus == 401
+                        ? unauthorized()
+                        : new MockResponse().setResponseCode(keepAliveStatus).setBody("<response/>");
+            }
             if ("POST".equals(method) && path.matches("/services/search/(v2/)?jobs/?")) {
                 String id = form(request.getBody().readUtf8()).get("id");
                 createRequests.add(id);
@@ -204,7 +220,24 @@ class SplunkClientJobLifecycleTest {
         service.version = "10.4.3";
         service.instanceType = "enterprise";
         service.setReadTimeout(20_000);
-        client = new TestClient();
+        now = new AtomicReference<>(T);
+        Clock mutableClock = new Clock() {
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        client = new TestClient(mutableClock);
         client.setServiceForTest(service);
     }
 
@@ -634,5 +667,53 @@ class SplunkClientJobLifecycleTest {
                 .isFalse();
         assertThat(SplunkClient.neverSent(new RuntimeException(new java.net.SocketException("Connection reset"))))
                 .isFalse();
+    }
+
+    @Test
+    @DisplayName("Keepalive pings Splunk for up to 4 hours of inactivity and resumes after new activity")
+    void keepAlivePingsUpToFourHoursOfInactivityAndResumesAfterActivity() {
+        assertThat(SplunkClient.KEEPALIVE_INTERVAL).isEqualTo(Duration.ofMinutes(5));
+        assertThat(SplunkClient.MAX_KEEPALIVE_INACTIVITY).isEqualTo(Duration.ofHours(4));
+
+        // Exactly at 4 hours of inactivity: still kept alive
+        now.set(T.plus(Duration.ofHours(4)));
+        assertThat(client.keepAliveTick()).isTrue();
+        assertThat(splunk.keepAlives).hasValue(1);
+
+        // Past 4 hours of inactivity: skipped without touching Splunk
+        now.set(T.plus(Duration.ofHours(4)).plusSeconds(1));
+        assertThat(client.keepAliveTick()).isFalse();
+        assertThat(splunk.keepAlives).hasValue(1);
+
+        // User activity resets the 4-hour inactivity window
+        client.recordActivity();
+        now.set(now.get().plus(Duration.ofHours(3)));
+        assertThat(client.keepAliveTick()).isTrue();
+        assertThat(splunk.keepAlives).hasValue(2);
+    }
+
+    @Test
+    @DisplayName("Keepalive is quiet on 401 and skips while recovery is in flight or after logout")
+    void keepAliveNeverPromptsAndStopsOnLogout() throws Exception {
+        AtomicInteger prompts = new AtomicInteger();
+        client.setReloginProvider(message -> {
+            prompts.incrementAndGet();
+            return CompletableFuture.completedFuture("secret");
+        });
+        splunk.keepAliveStatus = 401;
+
+        assertThat(client.keepAliveTick()).isFalse();
+        assertThat(splunk.keepAlives).hasValue(1);
+        assertThat(prompts).as("keepalive failure never opens the relogin prompt").hasValue(0);
+
+        splunk.keepAliveStatus = 200;
+        client.startKeepAlive(Duration.ofMillis(30));
+        await().atMost(2, SECONDS).until(() -> splunk.keepAlives.get() >= 3);
+
+        client.logout();
+        int countAtLogout = splunk.keepAlives.get();
+        Thread.sleep(120);
+        assertThat(splunk.keepAlives).hasValue(countAtLogout);
+        assertThat(client.keepAliveTick()).isFalse();
     }
 }

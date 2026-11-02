@@ -638,7 +638,7 @@ public final class AllFieldsPopup extends JPanel {
                             for (Cell cell : fri.cells()) {
                                 boolean selected = fri.rowIndex() == selectedRow && cell.col() == selectedCol;
                                 boolean hovered = cell.equals(hoverCell);
-                                SuggestedFieldsPanel.paintCell(g2, fm, cell, selected, hovered);
+                                SuggestedFieldsPanel.paintCell(g2, fm, cell, selected, hovered, false);
                             }
                         }
                     }

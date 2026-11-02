@@ -69,15 +69,15 @@ class ScopeChipsTest {
     }
 
     @Test
-    void fieldTermsShowTheirFieldAndValueWithoutTheMarker() throws Exception {
+    void fieldTermsShowOnlyTheirValue() throws Exception {
         String debug = FieldTerm.of("level", "DEBUG").orElseThrow().encode();
         String host = FieldTerm.of("host", "a*").orElseThrow().encode();
         ScopeChips chips = create(term -> {});
         onEdt(() -> chips.setTerms(List.of(debug), List.of(host, "healthcheck")));
 
-        assertThat(texts(chips)).contains("+level=\"DEBUG\"", "\u2212host=\"a*\"", "\u2212\"healthcheck\"");
+        assertThat(texts(chips)).contains("+\"DEBUG\"", "\u2212\"a*\"", "\u2212\"healthcheck\"");
         assertThat(texts(chips)).noneMatch(text -> text.indexOf('\uE000') >= 0);
-        assertThat(ScopeChips.chipText("+", debug)).isEqualTo("+level=\"DEBUG\"");
+        assertThat(ScopeChips.chipText("+", debug)).isEqualTo("+\"DEBUG\"");
         assertThat(ScopeChips.chipText("+", "a=\"b\"")).isEqualTo("+\"a=\"b\"\"");
     }
 

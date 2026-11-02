@@ -10,9 +10,15 @@ import se.grynna.pager.splunk.SearchHit;
 import se.grynna.pager.splunk.SegmentInfo;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 public interface LogDataProvider {
+
+    /** Style spans for the message of {@code line} in 0-based message coordinates; empty by default. */
+    default List<StyleSpan> styleSpans(int line) {
+        return List.of();
+    }
 
     int getMaxOobPerSide();
 

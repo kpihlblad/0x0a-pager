@@ -168,8 +168,19 @@ public class IndexPanel extends JPanel {
             }
 
             @Override
+            public void onScopeFieldSummariesUpdated(Scope scope, SortedSet<FieldSummary> fieldSummaries,
+                    boolean fromCache) {
+                IndexPanel.this.onFieldSummariesUpdated(scope, fieldSummaries, fromCache);
+            }
+
+            @Override
             public void onFieldSummaryRefreshFailed(String index, Throwable error) {
                 IndexPanel.this.onFieldSummaryRefreshFailed(index, error);
+            }
+
+            @Override
+            public void onScopeFieldSummaryRefreshFailed(Scope scope, Throwable error) {
+                IndexPanel.this.onFieldSummaryRefreshFailed(scope, error);
             }
         });
         searchManager.setIndexUpdateListener(new IndexUpdateListener() {
@@ -438,7 +449,7 @@ public class IndexPanel extends JPanel {
         manualQueryField.setBackground(DarculaColors.BACKGROUND_OUTSIDE);
         manualQueryField.setForeground(DarculaColors.FOREGROUND);
         manualQueryField.setBorder(BORDER_QUERY_TEXT);
-        manualQueryField.setCaret(new BlockCaret(DarculaColors.ORANGE));
+        manualQueryField.setCaret(new BlockCaret(() -> DarculaColors.ORANGE));
 
         JLabel prompt = new JLabel(PROMPT);
         prompt.setFont(boldFont);
@@ -534,18 +545,36 @@ public class IndexPanel extends JPanel {
         if (allFields.isEmpty()) {
             suggestedFieldsPanel.updateState(List.of(), draft, LOADING_FIELDS_LABEL);
         }
+        suggestedFieldsPanel.setLoading(true);
 
         try {
-            SortedSet<FieldSummary> summaries = forceRefresh
-                    ? searchManager.deepenFieldSummaries(selectedIndex)
-                    : searchManager.loadFieldSummaries(selectedIndex, false);
+            Scope targetScope = draft != null && selectedIndex.equals(draft.index())
+                    ? draft
+                    : Scope.ofValues(selectedIndex, Map.of());
+            SortedSet<FieldSummary> summaries = loadOrDeepenSummaries(targetScope, forceRefresh);
             updateFiltersMeta();
-            onFieldSummariesUpdated(selectedIndex, summaries, true);
+            if (summaries != null && (!summaries.isEmpty() || "onIndexSelected".equals(reason))) {
+                onFieldSummariesUpdated(targetScope, summaries, true);
+            }
         } catch (RuntimeException e) {
+            suggestedFieldsPanel.setLoading(false);
             log.error("refreshFields: Failed to load field summaries for index '{}'", selectedIndex, e);
             showNotification("Failed to load field summaries: " + ExceptionMessageFormatter.formatException(e),
                     Notifications.Type.ERROR);
         }
+    }
+
+    private SortedSet<FieldSummary> loadOrDeepenSummaries(Scope scope, boolean forceRefresh) {
+        String index = scope.index();
+        SortedSet<FieldSummary> summaries = forceRefresh
+                ? searchManager.deepenFieldSummariesForScope(scope)
+                : searchManager.loadFieldSummariesForScope(scope, false);
+        if ((summaries == null || summaries.isEmpty()) && index != null && (forceRefresh || allFields.isEmpty())) {
+            summaries = forceRefresh
+                    ? searchManager.deepenFieldSummaries(index)
+                    : searchManager.loadFieldSummaries(index, false);
+        }
+        return summaries != null ? summaries : Collections.emptySortedSet();
     }
 
     public void onFieldSummariesUpdated(String index, SortedSet<FieldSummary> fieldSummaries, boolean fromCache) {
@@ -554,14 +583,40 @@ public class IndexPanel extends JPanel {
                 log.debug("Dropping field update for '{}': current index is '{}'", index, currentIndex);
                 return;
             }
-            log.debug("Received field update for '{}': {} fields (fromCache: {})", index, fieldSummaries.size(),
-                    fromCache);
-            updateFilterPanel(fieldSummaries);
-
-            if (!fromCache) {
-                fieldRefreshButton.setRefreshing(false);
-            }
+            applyFieldSummariesUpdate(index, fieldSummaries, fromCache);
         });
+    }
+
+    public void onFieldSummariesUpdated(Scope scope, SortedSet<FieldSummary> fieldSummaries, boolean fromCache) {
+        SwingUtilities.invokeLater(() -> {
+            if (scope == null || !matchesCurrentDraft(scope)) {
+                log.debug("Dropping field update for '{}': current draft is '{}'",
+                        scope == null ? null : SplQuery.scope(scope),
+                        draft == null ? null : SplQuery.scope(draft));
+                return;
+            }
+            applyFieldSummariesUpdate(scope.index(), fieldSummaries, fromCache);
+        });
+    }
+
+    private void applyFieldSummariesUpdate(String index, SortedSet<FieldSummary> fieldSummaries, boolean fromCache) {
+        log.debug("Received field update for '{}': {} fields (fromCache: {})", index, fieldSummaries.size(),
+                fromCache);
+        if (!fromCache || !fieldSummaries.isEmpty()) {
+            suggestedFieldsPanel.setLoading(false);
+        }
+        updateFilterPanel(fieldSummaries);
+
+        if (!fromCache) {
+            fieldRefreshButton.setRefreshing(false);
+        }
+    }
+
+    private boolean matchesCurrentDraft(Scope scope) {
+        if (currentIndex == null || !currentIndex.equals(scope.index()) || draft == null) {
+            return false;
+        }
+        return SplQuery.scope(scope).equals(SplQuery.scope(draft));
     }
 
     private void onFieldSummaryRefreshFailed(String index, Throwable error) {
@@ -570,14 +625,31 @@ public class IndexPanel extends JPanel {
                 log.debug("Dropping field refresh failure for '{}': current index is '{}'", index, currentIndex);
                 return;
             }
-            log.warn("Field summary refresh failed for '{}': {}", index, error.toString());
-            fieldRefreshButton.setRefreshing(false);
-            if (allFields.isEmpty()) {
-                updateFilterPanel(Collections.emptySortedSet());
-            }
-            showNotification("Failed to load field summaries: " + ExceptionMessageFormatter.formatException(error),
-                    Notifications.Type.ERROR);
+            applyFieldSummaryRefreshFailed(index, error);
         });
+    }
+
+    private void onFieldSummaryRefreshFailed(Scope scope, Throwable error) {
+        SwingUtilities.invokeLater(() -> {
+            if (scope == null || !matchesCurrentDraft(scope)) {
+                log.debug("Dropping field refresh failure for '{}': current draft is '{}'",
+                        scope == null ? null : SplQuery.scope(scope),
+                        draft == null ? null : SplQuery.scope(draft));
+                return;
+            }
+            applyFieldSummaryRefreshFailed(scope.index(), error);
+        });
+    }
+
+    private void applyFieldSummaryRefreshFailed(String index, Throwable error) {
+        log.warn("Field summary refresh failed for '{}': {}", index, error.toString());
+        fieldRefreshButton.setRefreshing(false);
+        suggestedFieldsPanel.setLoading(false);
+        if (allFields.isEmpty()) {
+            updateFilterPanel(Collections.emptySortedSet());
+        }
+        showNotification("Failed to load field summaries: " + ExceptionMessageFormatter.formatException(error),
+                Notifications.Type.ERROR);
     }
 
     private void onIndexSelected(String key) {
@@ -603,6 +675,7 @@ public class IndexPanel extends JPanel {
 
         if (isBlank(selectedIndex)) {
             draft = Scope.ofValues(null, Map.of());
+            suggestedFieldsPanel.setLoading(false);
             syncUiFromDraft(NO_FIELDS_LABEL);
             return;
         }
@@ -623,9 +696,14 @@ public class IndexPanel extends JPanel {
     }
 
     private Scope applyDraftEdit(Scope updated) {
+        String previousQuery = draft == null || isBlank(draft.index()) ? "" : SplQuery.scope(draft);
         List<LogicalField> logicals = allFields.stream().map(SuggestedField::field).toList();
         draft = FieldSuggestions.reconcileAliases(updated, logicals);
-        syncUiFromDraft(NO_FIELDS_LABEL);
+        syncUiFromDraft(allFields.isEmpty() ? LOADING_FIELDS_LABEL : NO_FIELDS_LABEL);
+        String nextQuery = draft == null || isBlank(draft.index()) ? "" : SplQuery.scope(draft);
+        if (isNotBlank(currentIndex) && !nextQuery.equals(previousQuery)) {
+            refreshFields(currentIndex, false, "filterChanged");
+        }
         return draft;
     }
 
@@ -703,8 +781,7 @@ public class IndexPanel extends JPanel {
         List<String> keptExclude = draft.exclude().stream()
                 .filter(term -> !se.grynna.pager.splunk.FieldTerm.isFieldTerm(term))
                 .toList();
-        draft = new Scope(draft.index(), Map.of(), draft.narrow(), keptExclude, draft.manualSpl(), Map.of());
-        syncUiFromDraft(NO_FIELDS_LABEL);
+        applyDraftEdit(new Scope(draft.index(), Map.of(), draft.narrow(), keptExclude, draft.manualSpl(), Map.of()));
     }
 
     private String generatedPredicate() {
@@ -779,6 +856,7 @@ public class IndexPanel extends JPanel {
 
     private void handleCancel() {
         log.info("handleCancel: Cancelling");
+        suggestedFieldsPanel.setLoading(false);
         closeAllFieldsPopup();
         if (onCancel != null) {
             onCancel.run();
@@ -807,6 +885,7 @@ public class IndexPanel extends JPanel {
         if (outside > 0) {
             bookmarkGuard.drop(newScope);
         }
+        suggestedFieldsPanel.setLoading(false);
         searchManager.setScope(newScope);
 
         if (onLoginComplete != null) {
@@ -881,7 +960,7 @@ public class IndexPanel extends JPanel {
         allFields = FieldSuggestions.allFields(groupedEntries);
         List<LogicalField> logicals = allFields.stream().map(SuggestedField::field).toList();
         draft = FieldSuggestions.reconcileAliases(draft, logicals);
-        syncUiFromDraft(NO_FIELDS_LABEL);
+        syncUiFromDraft(suggestedFieldsPanel.isLoading() ? LOADING_FIELDS_LABEL : NO_FIELDS_LABEL);
     }
 
     AllFieldsPopup openAllFieldsPopup(String initialFilter) {

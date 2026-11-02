@@ -19,6 +19,17 @@ class FieldSamplingTest {
     }
 
     @Test
+    void includesFieldFiltersAndNarrowExcludeStagesInScopeQuery() {
+        Scope scope = Scope.of("k8s_prod", java.util.Map.of("app", "orders"))
+                .withNarrow("timeout")
+                .withExcludeField("level", "DEBUG");
+
+        assertThat(FieldSampling.query(scope, 0)).startsWith(
+                "search index=\"k8s_prod\" app=\"orders\" | search \"timeout\" | search NOT level=\"DEBUG\""
+                        + " | head 10000 | fieldsummary");
+    }
+
+    @Test
     void excludesFreeTextFields() {
         assertThat(FieldSampling.query("main", 0)).endsWith("\"kubernetes.pod_uid\", \"linecount\")")
                 .contains("| where NOT field IN (\"@timestamp\", ");

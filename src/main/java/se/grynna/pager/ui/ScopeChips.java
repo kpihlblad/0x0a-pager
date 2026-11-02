@@ -5,14 +5,16 @@ import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
 /**
  * The scope's filters in the status row: one chip per field filter and narrowing term
- * {@code +"term"} or {@code +field="value"}, and per excluded term {@code −"term"} or {@code −field="value"}, each
- * with a × that removes it. Hidden while the scope has no filters or terms. Long terms are elided and
+ * {@code +"term"} or {@code +"value"}, and per excluded term {@code −"term"} or {@code −"value"}, each
+ * with a × that removes it. A field filter shows only its value; its tooltip names the field. Chips are
+ * right-aligned and hidden while the scope has no filters or terms. Long terms are elided and
  * only the first {@link #MAX_CHIPS} get chips; the rest collapse into {@code +N more}
  * whose tooltip lists them all. Chips are not focusable.
  */
@@ -31,7 +33,7 @@ public class ScopeChips extends JPanel {
      * @param onRemove called on the EDT with the term whose × was pressed
      */
     public ScopeChips(Font font, Consumer<String> onRemove) {
-        super(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        super(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         this.font = font;
         this.onRemove = onRemove;
         setOpaque(false);
@@ -65,11 +67,11 @@ public class ScopeChips extends JPanel {
 
     /**
      * Chip text for one term: {@code +"term"} or {@code −"term"}, the term elided when long; a field term
-     * reads {@code +field="value"}.
+     * shows only its value.
      */
     static String chipText(String sign, String term) {
         return sign + FieldTerm.decode(term)
-                .map(field -> field.field() + "=\"" + elide(field.value()) + "\"")
+                .map(field -> "\"" + elide(field.value()) + "\"")
                 .orElseGet(() -> "\"" + elide(term) + "\"");
     }
 
@@ -79,12 +81,22 @@ public class ScopeChips extends JPanel {
 
     private JPanel chip(String sign, String term, boolean narrowing) {
         Color accent = narrowing ? DarculaColors.CYAN : DarculaColors.PINK;
-        JLabel text = new JLabel(chipText(sign, term));
+        JLabel text = new JLabel(chipText(sign, term)) {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
         text.setFont(font);
         text.setForeground(accent);
         text.setToolTipText(sign + " " + FieldTerm.display(term));
 
-        JButton remove = new JButton("×");
+        JButton remove = new JButton("×") {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
         remove.setFont(font);
         remove.setForeground(accent);
         remove.setMargin(new Insets(0, 3, 0, 3));
@@ -110,7 +122,12 @@ public class ScopeChips extends JPanel {
             }
             all.append(signs.get(i)).append(' ').append(escapeHtml(FieldTerm.display(terms.get(i))));
         }
-        JLabel more = new JLabel("+%d more".formatted(hidden));
+        JLabel more = new JLabel("+%d more".formatted(hidden)) {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
         more.setFont(font);
         more.setForeground(DarculaColors.GREY);
         more.setToolTipText(all.append("</html>").toString());

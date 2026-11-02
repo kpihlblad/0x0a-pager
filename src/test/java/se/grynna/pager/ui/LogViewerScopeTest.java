@@ -275,7 +275,7 @@ class LogViewerScopeTest {
             viewer.loginComplete(searchManager);
             ScopeChips chips = find(viewer, ScopeChips.class).getFirst();
             List<String> chipLabels = find(chips, JLabel.class).stream().map(JLabel::getText).toList();
-            assertThat(chipLabels).containsExactly("+pod=\"a\"", "+pod=\"b\"");
+            assertThat(chipLabels).containsExactly("+\"a\"", "+\"b\"");
 
             statusBar.setFirstVisibleTimestamp(top);
             clearInvocations();

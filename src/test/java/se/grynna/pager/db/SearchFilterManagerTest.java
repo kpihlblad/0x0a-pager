@@ -712,6 +712,33 @@ class SearchFilterManagerTest {
         assertEquals(10_000, manager.fieldSampleSize("B"));
     }
 
+    @Test
+    void scopeQueryCacheReusesFreshResultAndInvalidatesOnDeepen() throws Exception {
+        var listener = mock(FieldSummaryUpdateListener.class);
+        when(searchManager.getFieldSummaryUpdateListener()).thenReturn(listener);
+        Scope filtered = Scope.of("A", Map.of("app", "orders")).withNarrow("timeout");
+        SortedSet<FieldSummary> first = summaries("pod", "level");
+        SortedSet<FieldSummary> deeper = summaries("pod", "level", "rare");
+        when(splunkClient.loadFieldSummaryForScope(eq(filtered), eq(0), any(), any())).thenReturn(first);
+        when(splunkClient.loadFieldSummaryForScope(eq(filtered), eq(1), any(), any())).thenReturn(deeper);
+
+        assertTrue(manager.loadFieldSummariesForScope(filtered, false).isEmpty());
+        verify(listener, timeout(2000)).onScopeFieldSummariesUpdated(eq(filtered), eq(first), eq(false));
+        verify(splunkClient, times(1)).loadFieldSummaryForScope(eq(filtered), eq(0), any(), any());
+
+        // Cache hit for identical query does not re-run calculation
+        SortedSet<FieldSummary> cached = manager.loadFieldSummariesForScope(filtered, false);
+        assertEquals(first, cached);
+        Thread.sleep(100);
+        verify(splunkClient, times(1)).loadFieldSummaryForScope(eq(filtered), eq(0), any(), any());
+
+        // Deepening invalidates the cached query entry for the index and re-samples at depth 1
+        assertTrue(manager.deepenFieldSummariesForScope(filtered).isEmpty());
+        verify(splunkClient, timeout(2000).times(1)).loadFieldSummaryForScope(eq(filtered), eq(1), any(), any());
+        verify(listener, timeout(2000).times(2)).onScopeFieldSummariesUpdated(eq(filtered), any(), eq(false));
+        assertEquals(deeper, manager.loadFieldSummariesForScope(filtered, false));
+    }
+
     private void awaitNoRefreshRunning() throws Exception {
         // The refresh finishes (and records its time) right after it stores the result
         verify(databaseManager, timeout(2000).atLeastOnce()).storeIndexes(any());

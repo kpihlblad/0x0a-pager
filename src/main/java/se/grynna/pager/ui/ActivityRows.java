@@ -80,6 +80,17 @@ public final class ActivityRows {
         return rows;
     }
 
+    /** A single term row with its Narrow and Exclude buttons, for a menu that acts on one term. */
+    static JMenuItem termRow(String term, String narrowTooltip, String excludeTooltip, Runnable narrow,
+            Runnable exclude, boolean enabled) {
+        Row row = new Row("term", "", term, narrowTooltip, excludeTooltip, narrow, exclude,
+                UIManager.getFont("MenuItem.font"));
+        row.setEnabled(enabled);
+        row.narrow.setEnabled(enabled);
+        row.exclude.setEnabled(enabled);
+        return row;
+    }
+
     /** Give each label column the width of its widest cell, so every row has the same layout. */
     private static void alignColumns(List<Row> rows) {
         for (int column = 0; column < Row.LABEL_COLUMNS; column++) {
@@ -241,7 +252,7 @@ public final class ActivityRows {
         }
 
         private ActionPill button(String text, Color accent, String tooltip, Runnable action) {
-            ActionPill button = new ActionPill(text, accent);
+            ActionPill button = new ActionPill(text, accent, Fontalizer.getSmallUiFont());
             button.setToolTipText(tooltip);
             button.addActionListener(e -> {
                 MenuSelectionManager.defaultManager().clearSelectedPath();

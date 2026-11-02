@@ -10,14 +10,14 @@ import java.util.Random;
  */
 public class ASCIINightSkyGenerator {
 
-    private final Random random = new Random();
+    private final Random random;
     private int width;
     private int height;
     private String[][] skyMatrix;
 
     // Small star characters and their probabilities
-    private final String[] smallStars = {".", "+", "*", "⊹", "'", "★"};
-    private final double[] smallStarProbabilities = {0.35, 0.2, 0.1, 0.1, 0.25};
+    private final String[] smallStars = {".", "+", "*", "o", "'", "✦", "★"};
+    private final double[] smallStarProbabilities = {0.34, 0.17, 0.10, 0.10, 0.22, 0.05, 0.02};
 
     // Multi-line ASCII art for bigger objects (♦ represents non-transparent whitespace that cannot overlap)
     private final String[] bigStars = {"""
@@ -32,24 +32,26 @@ public class ASCIINightSkyGenerator {
             ♦|♦
             -+-
             ♦|♦""", """
-            ♦ | ♦
-            - * -
-            ♦ | ♦"""};
+            ♦♦|♦♦
+            -♦o♦-
+            ♦♦|♦♦""", """
+            ♦♦|♦♦
+            -♦*♦-
+            ♦♦|♦♦"""};
 
     private final String[] asteroids = {"~~+", """
             \\♦♦
             ♦\\♦
-            ♦♦*♦""", """
-            ':.♦♦♦
+            ♦♦*""", """
+            ':.♦♦♦♦♦
             ♦♦'::._♦
-             ♦♦♦'._)♦""", "+~~♦" + "♦♦♦♦", """
-            ♦♦♦/♦
-            ♦♦/♦
-            ♦*♦♦""", """
-                 ♦♦♦♦
-               ♦♦.:'♦
-             .::'♦♦
-            (_.'♦♦"""};
+            ♦♦♦♦'._)""", "+~~", """
+            ♦♦/
+            ♦/♦
+            *♦♦""", """
+            ♦♦♦♦♦.:'
+            ♦_.::'♦♦
+            (_.'♦♦♦♦"""};
 
     private final String[] moons = {"""
             .-.♦
@@ -57,7 +59,7 @@ public class ASCIINightSkyGenerator {
             '-´♦""", """
             ♦.-.♦
             (♦♦♦)
-            ♦`-'""", """
+            ♦`-'♦""", """
             ♦.-.
             (♦(♦
             ♦`-'""", """
@@ -65,36 +67,54 @@ public class ASCIINightSkyGenerator {
 
     private final String[] bigMoons = {"""
             ♦♦_..♦♦
-            '`-.♦`.♦
-             ♦♦♦\\♦♦\\
-             ♦♦♦|♦♦|
-             ♦♦♦/♦♦/
-            _.-`_.`♦
-            ♦'''♦♦♦ """, """
-               ♦.-'""'-.♦
-             ♦.' () .   '.♦
-            ♦/ .      o   \\♦
-            ; o    _   ()  ;♦
-            ;     (_)      ;♦
-            ♦\\ .        o /♦
-             ♦'.  O  .  .'♦
-               ♦'-....-'♦
-            """, """
-               ♦♦.._♦♦
+            '`-.♦`.
+            ♦♦♦\\♦♦\\
+            ♦♦♦|♦♦|
+            ♦♦♦/♦♦/
+            _.-`_.`
+            ♦'''♦♦♦""", """
+            ♦♦♦.._♦♦
             ♦.'♦.-'`
-            /♦♦/♦♦♦
-            |♦♦|♦♦♦
-            \\♦♦\\♦♦♦
+            /♦♦/♦♦♦♦
+            |♦♦|♦♦♦♦
+            \\♦♦\\♦♦♦♦
             ♦'._'-._
-             ♦♦♦```♦"""};
+            ♦♦♦♦```♦"""};
+
+    private final String[] planets = {"""
+            ♦♦♦♦.-'""'-.♦♦♦♦
+            ♦♦.'♦()♦.♦♦♦'.♦♦
+            ♦/♦.♦♦♦♦♦♦o♦♦♦\\♦
+            ;♦o♦♦♦♦_♦♦♦()♦♦;
+            ;♦♦♦♦♦(_)♦♦♦♦♦♦;
+            ♦\\♦.♦♦♦♦♦♦♦♦o♦/♦
+            ♦♦'.♦♦O♦♦.♦♦.'♦♦
+            ♦♦♦♦'-....-'♦♦♦♦""", """
+            ♦♦♦♦♦.---.♦♦♦♦♦
+            ♦♦♦.'♦♦♦♦♦'.♦♦♦
+            _.-'♦♦♦o♦♦♦'-._
+            '--.._____..--'
+            ♦♦♦'.♦♦♦♦♦.'♦♦♦
+            ♦♦♦♦♦'---'♦♦♦♦♦"""};
 
     // Rare alien artifact - very uncommon
     private final String[] aliens = {"""
-            ♦♦ʔ  ʕ♦♦♦♦
-            (◕ ‿ ◕ ✿)♦
-            ☜[ ♡   ]☞♦
-            ♦♦~~~~~♦♦♦
-             ♦♦◡ ◡♦♦"""};
+            ♦♦ʔ♦♦ʕ♦♦♦
+            (◕♦‿♦◕♦✿)
+            ☜[♦♡♦♦♦]☞
+            ♦♦~~~~~♦♦
+            ♦♦♦◡♦◡♦♦♦"""};
+
+    // Subtle cosmic surprises (UFO, satellite, tiny rocket)
+    private final String[] surprises = {"""
+            ♦♦_.---._♦♦
+            .'♦♦○♦○♦♦'.
+            `~-.-~-.-~'""", """
+            [::]-o-[::]""", """
+            ♦/^\\♦
+            |-o-|
+            /___\\
+            ♦vvv♦"""};
 
     // Configuration options
     private int moonCount = 1;
@@ -102,7 +122,8 @@ public class ASCIINightSkyGenerator {
     private int bigStarCount = 3;
     private int smallStarCount = 80;
     private int alienCount = 0; // Aliens are rare, default to 0
-    private boolean requireNullSurrounding = false;
+    private int surpriseCount = 0;
+    private boolean requireNullSurrounding = true;
     private boolean useBigMoons = false;
 
     /**
@@ -112,8 +133,13 @@ public class ASCIINightSkyGenerator {
      * @param height Height of the sky chunk (minimum 5)
      */
     public ASCIINightSkyGenerator(int width, int height) {
+        this(width, height, new Random());
+    }
+
+    public ASCIINightSkyGenerator(int width, int height, Random random) {
         this.width = Math.max(width, 10);
         this.height = Math.max(height, 5);
+        this.random = random;
     }
 
     /**
@@ -224,12 +250,16 @@ public class ASCIINightSkyGenerator {
                 return false;
             }
 
-            // Check for overlaps - now ♦ characters represent non-transparent whitespace that cannot overlap
+            // Check for overlaps - ♦ characters represent non-transparent whitespace that cannot overlap
             for (int j = 0; j < lines[i].length(); j++) {
                 char ch = lines[i].charAt(j);
-                // Only check overlap for non-space characters (♦ now blocks placement)
-                if (ch != ' ' && skyMatrix[y + i][x + j] != null) {
-                    return false;
+                if (ch != ' ') {
+                    if (skyMatrix[y + i][x + j] != null) {
+                        return false;
+                    }
+                    if (requireNullSurrounding && !hasNullSurrounding(x + j, y + i)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -255,10 +285,23 @@ public class ASCIINightSkyGenerator {
      */
     private void fillSky() {
         // Place larger objects first to avoid blocking
-        placeFromArray(useBigMoons ? bigMoons : moons, moonCount);
+        if (useBigMoons && moonCount > 0) {
+            if (moonCount == 1) {
+                placeFromArray(random.nextBoolean() ? bigMoons : planets, 1);
+            } else {
+                placeFromArray(bigMoons, 1);
+                placeFromArray(planets, 1);
+                if (moonCount > 2) {
+                    placeFromArray(moons, moonCount - 2);
+                }
+            }
+        } else {
+            placeFromArray(moons, moonCount);
+        }
+        placeFromArray(aliens, alienCount);
+        placeFromArray(surprises, surpriseCount);
         placeFromArray(asteroids, asteroidCount);
         placeFromArray(bigStars, bigStarCount);
-        placeFromArray(aliens, alienCount); // Place aliens
 
         // Place small stars last
         placeSmallStars(smallStarCount);
@@ -318,42 +361,50 @@ public class ASCIINightSkyGenerator {
     // Configuration methods
 
     /**
-     * Set the number of moons to generate (0-5).
+     * Set the number of moons to generate (0-100).
      */
     public ASCIINightSkyGenerator setMoonCount(int count) {
-        this.moonCount = Math.max(0, Math.min(5, count));
+        this.moonCount = Math.max(0, Math.min(100, count));
         return this;
     }
 
     /**
-     * Set the number of asteroids to generate (0-10).
+     * Set the number of asteroids to generate (0-50).
      */
     public ASCIINightSkyGenerator setAsteroidCount(int count) {
-        this.asteroidCount = Math.max(0, Math.min(10, count));
+        this.asteroidCount = Math.max(0, Math.min(50, count));
         return this;
     }
 
     /**
-     * Set the number of big stars to generate (0-15).
+     * Set the number of big stars to generate (0-100).
      */
     public ASCIINightSkyGenerator setBigStarCount(int count) {
-        this.bigStarCount = Math.max(0, Math.min(15, count));
+        this.bigStarCount = Math.max(0, Math.min(100, count));
         return this;
     }
 
     /**
-     * Set the number of small stars to generate (0-200).
+     * Set the number of small stars to generate (0-2000).
      */
     public ASCIINightSkyGenerator setSmallStarCount(int count) {
-        this.smallStarCount = Math.max(0, Math.min(200, count));
+        this.smallStarCount = Math.max(0, Math.min(2000, count));
         return this;
     }
 
     /**
-     * Set the number of aliens to generate (0-5).
+     * Set the number of aliens to generate (0-20).
      */
     public ASCIINightSkyGenerator setAlienCount(int count) {
-        this.alienCount = Math.max(0, Math.min(5, count));
+        this.alienCount = Math.max(0, Math.min(20, count));
+        return this;
+    }
+
+    /**
+     * Set the number of cosmic surprises (UFO, satellite, rocket) to generate (0-20).
+     */
+    public ASCIINightSkyGenerator setSurpriseCount(int count) {
+        this.surpriseCount = Math.max(0, Math.min(20, count));
         return this;
     }
 

@@ -837,9 +837,13 @@ class LogViewerDetailsTest {
 
             JPopupMenu menu = viewer.detailsFieldMenu();
 
-            assertThat(texts(menu)).containsExactly("Narrow to level=\"INFO\" (+)", "Exclude level=\"INFO\" (-)",
-                    "Add to message (f)", "Copy value (Ctrl-C)", "Copy level=\"INFO\"");
-            assertThat(menuItem(menu, "Narrow to level=\"INFO\" (+)").isEnabled()).isTrue();
+            assertThat(texts(menu)).containsExactly("", "Add to message (f)", "Copy value (Ctrl-C)",
+                    "Copy level=\"INFO\"");
+            List<JButton> pills = ActivityMenuTest.buttons(menu);
+            assertThat(pills).extracting(JButton::getText).containsExactly("+ Narrow", "\u2212 Exclude");
+            assertThat(pills).extracting(JButton::getToolTipText)
+                    .containsExactly("Narrow to level=\"INFO\" (+)", "Exclude level=\"INFO\" (-)");
+            assertThat(pills).allMatch(JButton::isEnabled);
         });
     }
 
@@ -855,6 +859,7 @@ class LogViewerDetailsTest {
 
             assertThat(texts(menu)).contains("Reset message fields");
             assertThat(menuItem(menu, texts(menu).getFirst()).isEnabled()).isFalse();
+            assertThat(ActivityMenuTest.buttons(menu)).allMatch(button -> !button.isEnabled());
             assertThat(menuItem(menu, "Add to message (f)").isEnabled()).isFalse();
 
             select("level");

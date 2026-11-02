@@ -25,6 +25,7 @@ public class MenuManager {
     private final JMenuItem rangeItem;
     private final JMenuItem helpItem;
     private final JCheckBoxMenuItem cursorItem;
+    private final JCheckBoxMenuItem lightModeItem;
 
     public MenuManager(LogViewer viewer) {
         KeyMap keyMap = KeyMap.preferred();
@@ -102,6 +103,7 @@ public class MenuManager {
                 helpItem.setText(helpText(keyMap));
                 cursorItem.setText(cursorText(keyMap));
                 cursorItem.setSelected(viewer.isCursorMode());
+                lightModeItem.setSelected(viewer.isLightMode());
                 bookmarkItem.setText(bookmarkText(keyMap));
                 bookmarkItem.setEnabled(viewer.hasLogLines());
                 narrowActivityItem.setText(narrowActivityText(keyMap));
@@ -128,6 +130,10 @@ public class MenuManager {
         });
 
         popupMenu.addSeparator();
+
+        lightModeItem = new JCheckBoxMenuItem("Light mode");
+        lightModeItem.addActionListener(e -> viewer.toggleLightMode());
+        popupMenu.add(lightModeItem);
 
         JMenuItem preferencesItem = new JMenuItem("Preferences...");
         preferencesItem.addActionListener(e -> viewer.showPreferences());

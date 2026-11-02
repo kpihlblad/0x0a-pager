@@ -63,7 +63,7 @@ class CursorManagerBoundariesTest {
 
         int actualTopLine = cursorManager.getPageStart();
         org.assertj.core.api.Assertions.assertThat(actualTopLine).as("topLineOnPage should snap to before boundary")
-                .isEqualTo(-6);
+                .isEqualTo(-5);
     }
 
     @Test
@@ -78,7 +78,7 @@ class CursorManagerBoundariesTest {
         // Should be snapped to 138
         int actualTopLine = cursorManager.getPageStart();
         org.assertj.core.api.Assertions.assertThat(actualTopLine)
-                .as("topLineOnPage should snap to keep bottom within now boundary + maxOobPerSide").isEqualTo(11);
+                .as("topLineOnPage should snap to keep bottom within now boundary + maxOobPerSide").isEqualTo(10);
     }
 
     @Test
@@ -91,7 +91,7 @@ class CursorManagerBoundariesTest {
         // Should snap to now boundary: 150 - 2 - 10 = 138
         int actualTopLine = cursorManager.getPageStart();
         org.assertj.core.api.Assertions.assertThat(actualTopLine)
-                .as("Should use now boundary when it's more restrictive than after boundary").isEqualTo(146);
+                .as("Should use now boundary when it's more restrictive than after boundary").isEqualTo(145);
     }
 
     @Test
@@ -103,7 +103,7 @@ class CursorManagerBoundariesTest {
 
         int actualTopLine = cursorManager.getPageStart();
         org.assertj.core.api.Assertions.assertThat(actualTopLine).as("Scrolling should respect before boundary")
-                .isEqualTo(-106);
+                .isEqualTo(-105);
     }
 
     @Test
@@ -119,7 +119,7 @@ class CursorManagerBoundariesTest {
 
         int actualTopLine = cursorManager.getPageStart();
         org.assertj.core.api.Assertions.assertThat(actualTopLine).as("Scrolling should respect after boundary")
-                .isEqualTo(196);
+                .isEqualTo(195);
     }
 
     @Test
@@ -164,7 +164,7 @@ class CursorManagerBoundariesTest {
 
         cursorManager.scrollContent(1, 0);
 
-        // snappedDelta = 1 - (MAX_VALUE - 2 + 1 + 3 - (MIN_VALUE - 1)) = -4294967297,
+        // snappedDelta = 1 - (MAX_VALUE - 2 + 1 + 4 - (MIN_VALUE - 1)) = -4294967298,
         // clamped to MIN_VALUE so pageStart moves by exactly Integer.MIN_VALUE.
         assertThat(cursorManager.getPageStart()).isEqualTo(-3);
     }
@@ -177,7 +177,7 @@ class CursorManagerBoundariesTest {
 
         cursorManager.scrollContent(-2, 0);
 
-        // snappedDelta = -2 + (MAX_VALUE - (MIN_VALUE + 9)), clamped to MAX_VALUE
+        // snappedDelta = -2 + (MAX_VALUE - (MIN_VALUE + 8)), clamped to MAX_VALUE
         assertThat(cursorManager.getPageStart()).isEqualTo(2);
     }
 

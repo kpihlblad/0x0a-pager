@@ -37,8 +37,8 @@ import static se.grynna.pager.splunk.BoundaryType.*;
 public class SplunkLogDataProvider implements LogDataProvider {
 
     // Leave enough rows for several pages of scrolling while the next query runs.
-    static final int PRELOAD_EARLIER_DISTANCE_LINES = 3000;
-    static final int PRELOAD_LATER_DISTANCE_LINES = 1500;
+    static final int PRELOAD_EARLIER_DISTANCE_LINES = 3500;
+    static final int PRELOAD_LATER_DISTANCE_LINES = 1800;
 
     // allow only ONE of this class to run at a time
     private static final AtomicInteger counter = new AtomicInteger();

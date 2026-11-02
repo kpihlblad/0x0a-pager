@@ -16,6 +16,8 @@ public enum InputState {
     DEFAULT(false, ""),
     INIT(false, "Press {LOGIN} to login and select index."),
     INIT_CURSOR(false, "Cursor mode, {TOGGLE_CURSOR} for page mode."),
+    HELP(false, "Keyboard help · {LOGIN} scope · {TOGGLE_CURSOR} cursor mode · {HELP} or {CANCEL} back"),
+    HELP_CURSOR(false, "Keyboard help (cursor mode) · {TOGGLE_CURSOR} page mode · {HELP} or {CANCEL} back"),
     MODAL_LOGIN(false, "Enter Splunk credentials to login."),
     MODAL_INDEX(false, "Choose the scope: index and field filters"),
     SCROLL(false, "{NEXT_MATCH} next match, {OPEN_SEARCH} to search, {GOTO} to go to time, {TOGGLE_CURSOR} cursor mode, {HELP} for help."),

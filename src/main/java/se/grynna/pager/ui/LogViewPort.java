@@ -164,6 +164,9 @@ public interface LogViewPort extends ScrolLockListener {
     /** The context-menu key in the details: open the field menu at the selected field. */
     default void showDetailsFieldMenu() {}
 
+    /** Records user interaction so the session keepalive knows the application is active. */
+    default void recordActivity() {}
+
     void actionLogin();
 
     void loginComplete(SearchManager searchManager);

@@ -13,7 +13,7 @@ class BlockCaretTest {
     @Test
     void damageWidensCaretToOneCharacter() {
         JTextField field = new JTextField("abc");
-        BlockCaret caret = new BlockCaret(DarculaColors.ORANGE);
+        BlockCaret caret = new BlockCaret(() -> DarculaColors.ORANGE);
         field.setCaret(caret);
 
         caret.damage(new Rectangle(10, 5, 1, 16));

@@ -1,5 +1,8 @@
 package se.grynna.pager.ui;
 
+import se.grynna.pager.utils.DarculaColors;
+import se.grynna.pager.utils.Theme;
+
 import javax.swing.*;
 import javax.swing.plaf.LayerUI;
 import java.awt.*;
@@ -15,8 +18,6 @@ import java.util.function.Supplier;
  */
 final class InputFlashLayerUI extends LayerUI<JComponent> {
 
-    /** The minimap's blue-white glare. */
-    static final Color GLOW = new Color(200, 228, 255);
     static final float TINT_ALPHA = 0.28f;
     static final int GLARE_REACH = 10;
     static final float GLARE_PEAK = 0.55f;
@@ -28,7 +29,7 @@ final class InputFlashLayerUI extends LayerUI<JComponent> {
     private final AttentionFlash centerFlash;
     private final JComponent centerLabel;
 
-    private record GlareKey(int width, int height) {}
+    private record GlareKey(int width, int height, Theme theme) {}
 
     /** One rendered glare, kept while the size it is asked for stays the same. */
     private static final class GlareCache {
@@ -36,9 +37,9 @@ final class InputFlashLayerUI extends LayerUI<JComponent> {
         private BufferedImage cachedGlare;
 
         BufferedImage get(int width, int height) {
-            GlareKey key = new GlareKey(width, height);
+            GlareKey key = new GlareKey(width, height, DarculaColors.theme());
             if (!key.equals(cachedKey)) {
-                cachedGlare = Glow.render(width, height, GLARE_REACH, GLOW, GLARE_PEAK);
+                cachedGlare = Glow.render(width, height, GLARE_REACH, DarculaColors.GLOW, GLARE_PEAK);
                 cachedKey = key;
             }
             return cachedGlare;
@@ -95,13 +96,13 @@ final class InputFlashLayerUI extends LayerUI<JComponent> {
         }
         Graphics2D g2 = (Graphics2D) g.create();
         try {
-            g2.setColor(withAlpha(GLOW, TINT_ALPHA * intensity));
+            g2.setColor(withAlpha(DarculaColors.GLOW, TINT_ALPHA * intensity));
             g2.fillRect(text.x, text.y, text.width, text.height);
             BufferedImage glare = centerGlare.get(text.width, text.height);
             g2.setComposite(AlphaComposite.SrcOver.derive(Math.min(1f, intensity)));
             g2.drawImage(glare, text.x - GLARE_REACH, text.y - GLARE_REACH, null);
             g2.setComposite(AlphaComposite.SrcOver);
-            g2.setColor(withAlpha(GLOW, intensity));
+            g2.setColor(withAlpha(DarculaColors.GLOW, intensity));
             g2.drawRect(text.x, text.y, text.width - 1, text.height - 1);
         } finally {
             g2.dispose();
@@ -137,7 +138,7 @@ final class InputFlashLayerUI extends LayerUI<JComponent> {
         }
         Graphics2D g2 = (Graphics2D) g.create();
         try {
-            g2.setColor(withAlpha(GLOW, TINT_ALPHA * intensity));
+            g2.setColor(withAlpha(DarculaColors.GLOW, TINT_ALPHA * intensity));
             g2.fillRect(row.x, row.y, row.width, row.height);
 
             Rectangle zone = zone(layer, row);
@@ -145,7 +146,7 @@ final class InputFlashLayerUI extends LayerUI<JComponent> {
             g2.setComposite(AlphaComposite.SrcOver.derive(Math.min(1f, intensity)));
             g2.drawImage(glare, zone.x - GLARE_REACH, zone.y - GLARE_REACH, null);
             g2.setComposite(AlphaComposite.SrcOver);
-            g2.setColor(withAlpha(GLOW, intensity));
+            g2.setColor(withAlpha(DarculaColors.GLOW, intensity));
             g2.drawRect(zone.x, zone.y, zone.width - 1, zone.height - 1);
         } finally {
             g2.dispose();

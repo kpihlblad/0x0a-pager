@@ -42,6 +42,9 @@ public class DecoratedLogLine {
     // Patterns to highlight across all rows (selection echo, search matches, etc.)
     List<TextHighlight> highlights = new ArrayList<>();
 
+    /** Foreground and bold spans within the message text, in 0-based message coordinates. */
+    List<StyleSpan> styleSpans = List.of();
+
     /** Rule drawn at this row's top edge (Matches view only); null draws nothing. */
     GapRule gapRule;
     /** Dim text drawn after the message; never part of {@link #formattedLine()} or {@link #selected()}. */

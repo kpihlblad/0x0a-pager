@@ -12,7 +12,6 @@ import java.awt.event.MouseMotionAdapter;
 @Slf4j
 public class FloatingScrollBar {
 
-    private static final Color THUMB_COLOR = DarculaColors.GREY_DARK_TRANSLUCENT;
 
     // private final LogViewPort viewPort;
     private final CursorManager cursorManager;
@@ -144,7 +143,7 @@ public class FloatingScrollBar {
         if (isScrollbarVisible()) {
 
             // Draw scrollbar thumb
-            g2d.setColor(THUMB_COLOR);
+            g2d.setColor(DarculaColors.GREY_DARK_TRANSLUCENT);
             int thumbWidth = getThumbWidth();
             int thumbX = getThumbPosition();
             g2d.fillRoundRect(thumbX, renderArea.height - scrollbarHeight, thumbWidth, scrollbarHeight,

@@ -55,6 +55,9 @@ public class InputHandler {
     /** Millisecond clock for {@link #endSearchGuard}; a seam for tests. */
     private final LongSupplier clock;
 
+    /** Two Tab presses within the mouse double-click interval select the region under the cursor. */
+    private final PressAgainGuard doubleTapGuard = new PressAgainGuard(doubleTapWindowMillis());
+
     /** Keeps cursor mode in step with the Scroll Lock key and, where readable, its state. */
     private final ScrollLockSync scrollLock;
 
@@ -122,6 +125,7 @@ public class InputHandler {
         this.clickHandler = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                viewPort.recordActivity();
                 stopDragScroll();
                 endSearchGuard.reset();
                 pressClosedTimePanel = viewPort.closeTimePanel();
@@ -146,6 +150,7 @@ public class InputHandler {
 
             @Override
             public void mouseDragged(MouseEvent e) {
+                viewPort.recordActivity();
                 if (pressClosedTimePanel || ignoreDrag) {
                     return;
                 }
@@ -437,6 +442,8 @@ public class InputHandler {
         // Key bindings use WHEN_IN_FOCUSED_WINDOW so they work regardless,
         // but having focus on viewPanel keeps the event model tidy.
         viewer.setFocusable(true);
+        // Tab reaches the key bindings (double-tap selects) instead of moving focus away from the log.
+        viewer.setFocusTraversalKeysEnabled(false);
 
         // Detect shift-release to finalize selection-echo highlights.
         // KeyBindings (InputMap/ActionMap) don't fire on key-release, and KeyListener
@@ -452,6 +459,7 @@ public class InputHandler {
 
     private void setupMouse(JPanel panel) {
         panel.addMouseWheelListener(e -> {
+            viewPort.recordActivity();
             try {
                 // Trackpads often emit horizontal scroll as a wheel event where
                 // SHIFT swaps axis (or platforms report horizontal-only rotation).
@@ -487,6 +495,15 @@ public class InputHandler {
 
         panel.addMouseListener(clickHandler);
         panel.addMouseMotionListener(clickHandler);
+    }
+
+    /**
+     * The platform's double-click interval, which also bounds a double-tap; 500 ms where the desktop
+     * does not report one.
+     */
+    private static long doubleTapWindowMillis() {
+        Object interval = Toolkit.getDefaultToolkit().getDesktopProperty("awt.multiClickInterval");
+        return interval instanceof Integer millis ? millis : 500;
     }
 
     /**
@@ -588,6 +605,9 @@ public class InputHandler {
         if (target == null || target.action() != UiAction.CANCEL) {
             endSearchGuard.reset();
         }
+        if (target == null || target.action() != UiAction.SELECT_REGION) {
+            doubleTapGuard.reset();
+        }
         if (target == null) {
             return;
         }
@@ -620,6 +640,7 @@ public class InputHandler {
     }
 
     private void run(KeyHandler handler, KeyBinding binding) {
+        viewPort.recordActivity();
         try {
             handler.run(binding);
         } catch (Exception ex) {
@@ -758,6 +779,12 @@ public class InputHandler {
         handlers.put(UiAction.SELECT_PAGE_DOWN, ignored -> extendSelection(cursorManager.getLinesPerPage(), 0));
 
         handlers.put(UiAction.SET_MARK, ignored -> cursorManager.setMarkAtCursor());
+        handlers.put(UiAction.SELECT_REGION, ignored -> {
+            if (doubleTapGuard.press(clock.getAsLong())) {
+                cursorManager.selectRegionAtCursor();
+                offerSelectionToPrompt();
+            }
+        });
         // In the Bookmarks view Copy without a selection takes every bookmarked event.
         handlers.put(UiAction.COPY, ignored -> {
             if (viewPort.isDetailsOpen()) {

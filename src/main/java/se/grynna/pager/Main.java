@@ -6,8 +6,10 @@ import lombok.extern.slf4j.Slf4j;
 import raven.toast.Notifications;
 import raven.toast.ToastClientProperties;
 import se.grynna.pager.ui.AppClose;
+import se.grynna.pager.splunk.Config;
 import se.grynna.pager.ui.LogViewer;
 import se.grynna.pager.utils.DarculaColors;
+import se.grynna.pager.utils.Theme;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -33,9 +35,9 @@ public class Main {
         FlatDarculaLaf.setup(); // Apply Darcula theme
 
         SwingUtilities.invokeLater(() -> {
-            UIManager.put("Button.default.foreground", DarculaColors.ORANGE);
-
-            PagerLaf.setup(); // Apply Darcula theme
+            Theme theme = new Config().getTheme();
+            DarculaColors.use(theme);
+            PagerLaf.setup(theme);
 
             JFrame frame = new JFrame("0x0A Pager");
 

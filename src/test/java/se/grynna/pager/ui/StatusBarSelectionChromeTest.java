@@ -2,6 +2,7 @@ package se.grynna.pager.ui;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import se.grynna.pager.PagerLaf;
 import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.ActionMap;
@@ -35,6 +36,7 @@ class StatusBarSelectionChromeTest {
         when(viewer.getActionMap()).thenReturn(new ActionMap());
         when(viewer.getState()).thenReturn(InputState.CURSOR);
         onEdt(() -> {
+            PagerLaf.setup();
             KeyMap.setPreferredFlavour(KeyFlavour.DESKTOP);
             statusBar = new StatusBar(new Font(Font.MONOSPACED, Font.PLAIN, 12), viewer);
             statusBar.setSearchInputActive(true);
@@ -137,24 +139,21 @@ class StatusBarSelectionChromeTest {
             assertThat(button("− Exclude").getPreferredSize().height).isEqualTo(pillHeight);
             assertThat(buttonByTooltip("Exit search (Esc)").getPreferredSize().height).isEqualTo(pillHeight);
             assertThat(buttonByTooltip("Stop search").getPreferredSize().height).isEqualTo(pillHeight);
+        });
+    }
 
-            StatusBar defaultFontBar = new StatusBar(Fontalizer.getFont(), viewer);
-            JPopupMenu menu = ActivityMenu.build(
-                    List.of(new RowContextMenu.LevelItem(se.grynna.pager.splunk.Activity.Level.THREAD, "scheduler-10")),
-                    se.grynna.pager.splunk.Activity.Level.THREAD, KeyMap.defaults(), new ActivityRows.Actions() {
-                        @Override
-                        public void narrowTo(se.grynna.pager.splunk.Activity.Level level) {}
+    @Test
+    void actionPillsKeepTheWidthTheirLabelNeeds() throws Exception {
+        onEdt(() -> {
+            statusBar.setSearchActive(true, "search term");
+            statusBar.setSelectionTerm("timeout");
+            statusBar.setSize(1600, 100);
+            layout(statusBar);
 
-                        @Override
-                        public void excludeFrom(se.grynna.pager.splunk.Activity.Level level) {}
-                    });
-            List<JButton> popupButtons = ActivityMenuTest.buttons(menu);
-            JButton barNarrow = flatten(defaultFontBar).stream().filter(JButton.class::isInstance)
-                    .map(JButton.class::cast).filter(b -> "+ Narrow".equals(b.getText())).findFirst().orElseThrow();
-            JButton barExclude = flatten(defaultFontBar).stream().filter(JButton.class::isInstance)
-                    .map(JButton.class::cast).filter(b -> "− Exclude".equals(b.getText())).findFirst().orElseThrow();
-            assertThat(popupButtons.get(0).getPreferredSize()).isEqualTo(barNarrow.getPreferredSize());
-            assertThat(popupButtons.get(1).getPreferredSize()).isEqualTo(barExclude.getPreferredSize());
+            for (String text : List.of("Search", "+ Narrow", "\u2212 Exclude")) {
+                JButton pill = button(text);
+                assertThat(pill.getMaximumSize().width).isEqualTo(pill.getPreferredSize().width);
+            }
         });
     }
 
@@ -180,8 +179,9 @@ class StatusBarSelectionChromeTest {
             assertThat(button("+ Narrow").isVisible()).isTrue();
             statusBar.setDetailsMode(true);
             assertThat(button("Search").isVisible()).isFalse();
-            assertThat(button("+ Narrow").isVisible()).isFalse();
-            assertThat(button("− Exclude").isVisible()).isFalse();
+            assertThat(button("+ Narrow").isVisible()).isTrue();
+            assertThat(button("− Exclude").isVisible()).isTrue();
+            assertThat(button("+ Narrow").getToolTipText()).isEqualTo("Narrow scope to the field's value (+)");
         });
     }
 

@@ -19,6 +19,7 @@ import java.awt.geom.RoundRectangle2D;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
@@ -41,6 +42,8 @@ public final class SuggestedFieldsPanel extends JComponent {
     static final int LABEL_MAX_WIDTH = 220;
     static final int LABEL_RIGHT_GAP = 14;
     static final int MAX_VALUE_CHARS = 32;
+    static final int SPINNER_DELAY_MS = 130;
+
     private static final String ELLIPSIS = "\u2026";
 
     enum CellKind {
@@ -61,6 +64,9 @@ public final class SuggestedFieldsPanel extends JComponent {
     private List<SuggestedField> rows = List.of();
     private Scope draft = Scope.ofValues(null, Map.of());
     private String emptyMessage = "No fields available for this index.";
+    private boolean loading = false;
+    private int spinnerIndex = 0;
+    private final Timer spinnerTimer;
     private int selectedRow = 0;
     private int selectedCol = 1;
     private int hoverRow = -1;
@@ -71,6 +77,10 @@ public final class SuggestedFieldsPanel extends JComponent {
         this.scopeEditor = scopeEditor;
         this.onOpenAllFields = onOpenAllFields;
         this.onMoveUp = onMoveUp;
+        this.spinnerTimer = new Timer(SPINNER_DELAY_MS, e -> {
+            spinnerIndex++;
+            repaint();
+        });
         setFont(font);
         setFocusable(true);
         setOpaque(false);
@@ -104,6 +114,32 @@ public final class SuggestedFieldsPanel extends JComponent {
         repaint();
     }
 
+    /**
+     * Starts or stops the loading state. While loading, existing field rows stay visible with their share percentages
+     * replaced by dimmed random digits that change every tick, and an empty grid shows a loading message with
+     * {@code ...}.
+     */
+    public void setLoading(boolean loading) {
+        if (this.loading == loading) {
+            return;
+        }
+        this.loading = loading;
+        if (loading) {
+            spinnerIndex = 0;
+            spinnerTimer.start();
+        } else {
+            spinnerTimer.stop();
+        }
+        revalidate();
+        repaint();
+    }
+
+    @Override
+    public void removeNotify() {
+        spinnerTimer.stop();
+        super.removeNotify();
+    }
+
     /** Moves keyboard focus into the first row's first value cell (or label cell if none). */
     public void focusFirstRow() {
         selectedRow = 0;
@@ -117,6 +153,50 @@ public final class SuggestedFieldsPanel extends JComponent {
 
     List<SuggestedField> rows() {
         return rows;
+    }
+
+    boolean isLoading() {
+        return loading;
+    }
+
+    boolean isSpinnerTimerRunning() {
+        return spinnerTimer.isRunning();
+    }
+
+    String loadingShareText(int row, int col) {
+        return randomShareText(spinnerIndex, row, col);
+    }
+
+    /** A random percentage such as {@code "37%"}, fixed at three characters, for the given tick and cell. */
+    static String randomShareText(int tick, int row, int col) {
+        long seed = tick * 1_000_003L + row * 1_009L + col;
+        return "%02d%%".formatted(new Random(seed).nextInt(100));
+    }
+
+    List<String> displayedShareTexts() {
+        List<String> out = new ArrayList<>();
+        for (RowLayout rl : layoutRows()) {
+            for (Cell cell : rl.cells()) {
+                if (cell.kind() == CellKind.VALUE) {
+                    out.add(cell.shareText());
+                }
+            }
+        }
+        return out;
+    }
+
+    String displayedEmptyText() {
+        if (!rows.isEmpty()) {
+            return "";
+        }
+        return loading ? loadingEmptyText() : emptyMessage;
+    }
+
+    private String loadingEmptyText() {
+        if (emptyMessage != null && (emptyMessage.contains("...") || emptyMessage.contains(ELLIPSIS))) {
+            return emptyMessage;
+        }
+        return "Loading field summaries...";
     }
 
     int selectedRow() {
@@ -370,14 +450,14 @@ public final class SuggestedFieldsPanel extends JComponent {
             List<ValueShare> top = sf.topValues();
             int shownValues = top.size();
             if (getWidth() > 0) {
-                shownValues = countFittingValues(fm, sf, x, availWidth);
+                shownValues = countFittingValues(fm, sf, r, x, availWidth);
             }
 
             int col = 1;
             for (int i = 0; i < shownValues; i++) {
                 ValueShare vs = top.get(i);
                 String valText = elideValue(vs.value());
-                String shareText = vs.sharePercent() + "%";
+                String shareText = loading ? loadingShareText(r, col) : vs.sharePercent() + "%";
                 int cellW = CELL_PAD_X + fm.stringWidth(valText) + SHARE_GAP + fm.stringWidth(shareText) + CELL_PAD_X;
                 boolean narrowed = FieldSuggestions.isValueNarrowed(sf.field(), vs.value(), draft);
                 boolean excluded = FieldSuggestions.isValueExcluded(sf.field(), vs.value(), draft);
@@ -398,14 +478,14 @@ public final class SuggestedFieldsPanel extends JComponent {
         return layouts;
     }
 
-    private int countFittingValues(FontMetrics fm, SuggestedField sf, int startX, int availWidth) {
+    private int countFittingValues(FontMetrics fm, SuggestedField sf, int row, int startX, int availWidth) {
         List<ValueShare> top = sf.topValues();
         int x = startX;
         int shown = 0;
         for (int i = 0; i < top.size(); i++) {
             ValueShare vs = top.get(i);
             String valText = elideValue(vs.value());
-            String shareText = vs.sharePercent() + "%";
+            String shareText = loading ? loadingShareText(row, i + 1) : vs.sharePercent() + "%";
             int cellW = CELL_PAD_X + fm.stringWidth(valText) + SHARE_GAP + fm.stringWidth(shareText) + CELL_PAD_X;
             int remaining = sf.valueCount() - (i + 1);
             int moreReserve = remaining > 0 ? fm.stringWidth("+" + remaining) + 2 * CELL_PAD_X + CELL_GAP : 0;
@@ -500,7 +580,7 @@ public final class SuggestedFieldsPanel extends JComponent {
                 g2.setFont(font);
                 g2.setColor(DarculaColors.G6);
                 FontMetrics fm = g2.getFontMetrics();
-                g2.drawString(emptyMessage, 10, (getHeight() - fm.getHeight()) / 2 + fm.getAscent());
+                g2.drawString(displayedEmptyText(), 10, (getHeight() - fm.getHeight()) / 2 + fm.getAscent());
                 return;
             }
 
@@ -523,7 +603,7 @@ public final class SuggestedFieldsPanel extends JComponent {
                 for (Cell cell : rl.cells()) {
                     boolean cellSelected = focused && rl.row() == selectedRow && cell.col() == selectedCol;
                     boolean cellHovered = cell.equals(hoverCell);
-                    paintCell(g2, fm, cell, cellSelected, cellHovered);
+                    paintCell(g2, fm, cell, cellSelected, cellHovered, loading);
                 }
             }
         } finally {
@@ -531,7 +611,8 @@ public final class SuggestedFieldsPanel extends JComponent {
         }
     }
 
-    static void paintCell(Graphics2D g2, FontMetrics fm, Cell cell, boolean selected, boolean hovered) {
+    static void paintCell(Graphics2D g2, FontMetrics fm, Cell cell, boolean selected, boolean hovered,
+            boolean loading) {
         Rectangle b = cell.bounds();
         int baseline = b.y + (b.height - fm.getHeight()) / 2 + fm.getAscent();
 
@@ -586,7 +667,7 @@ public final class SuggestedFieldsPanel extends JComponent {
                 }
 
                 if (cell.shareText() != null) {
-                    g2.setColor(DarculaColors.G6);
+                    g2.setColor(loading ? DarculaColors.G5 : DarculaColors.G6);
                     g2.drawString(cell.shareText(), valX + valW + SHARE_GAP, baseline);
                 }
             }

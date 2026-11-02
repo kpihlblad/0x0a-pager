@@ -543,4 +543,86 @@ class IndexPanelTest {
         select("");
         assertThat(onEdt(() -> panel.generatedQuery())).isEmpty();
     }
+
+    @Test
+    void filterChangeRecalculatesSuggestedFieldsKeepsSpinnerPlaceholdersDropsStaleAndStopsTimer() throws Exception {
+        Scope unfiltered = Scope.ofValues("A", Map.of());
+        Scope filteredApp1 = Scope.of("A", Map.of("app", "app1"));
+        Scope filteredApp1Timeout = filteredApp1.withNarrow("timeout");
+        Map<String, SortedSet<FieldSummary>> queryCache = new ConcurrentHashMap<>();
+        queryCache.put(SplQuery.scope(unfiltered), fields("app", "pod"));
+        AtomicInteger calcCalls = new AtomicInteger();
+
+        when(searchManager.loadFieldSummariesForScope(any(), anyBoolean())).thenAnswer(inv -> {
+            Scope s = inv.getArgument(0);
+            calcCalls.incrementAndGet();
+            return queryCache.getOrDefault(SplQuery.scope(s), Collections.emptySortedSet());
+        });
+
+        select("A");
+        SuggestedFieldsPanel grid = onEdt(() -> panel.suggestedFieldsPanel());
+        assertThat(onEdt(grid::isLoading)).isFalse();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isFalse();
+        assertThat(onEdt(grid::displayedShareTexts)).allMatch(t -> t.endsWith("%"));
+        int callsAfterSelect = calcCalls.get();
+
+        // Filter change with cache miss: keeps current fields visible with random-digit placeholders
+        onEdt(() -> panel.narrowFieldValue("app", "app1"));
+        assertThat(calcCalls.get()).isEqualTo(callsAfterSelect + 1);
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod");
+        assertThat(onEdt(grid::isLoading)).isTrue();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isTrue();
+        assertThat(onEdt(grid::displayedShareTexts)).isNotEmpty().allMatch(t -> t.matches("\\d{2}%"));
+
+        // Filter changes again before first finishes; stale result for older query is discarded
+        onEdt(() -> {
+            panel.narrowLine().setInputText("timeout");
+            panel.narrowLine().acceptCompletion();
+        });
+        assertThat(calcCalls.get()).isEqualTo(callsAfterSelect + 2);
+
+        fieldListener.onScopeFieldSummariesUpdated(filteredApp1, fields("staleField"), false);
+        drainEdt();
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod");
+        assertThat(onEdt(grid::isLoading)).isTrue();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isTrue();
+
+        // Current query result arrives: list updates, spinners go away, timer stops
+        SortedSet<FieldSummary> freshFiltered = fields("app", "host");
+        queryCache.put(SplQuery.scope(filteredApp1Timeout), freshFiltered);
+        fieldListener.onScopeFieldSummariesUpdated(filteredApp1Timeout, freshFiltered, false);
+        drainEdt();
+
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "host");
+        assertThat(onEdt(grid::isLoading)).isFalse();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isFalse();
+        assertThat(onEdt(grid::displayedShareTexts)).isNotEmpty().allMatch(t -> t.endsWith("%"));
+
+        // Returning to a cached query resolves immediately without leaving the spinner running
+        onEdt(() -> panel.narrowLine().removeChip(panel.narrowLine().chips().getLast()));
+        onEdt(() -> panel.narrowLine().removeChip(panel.narrowLine().chips().getFirst()));
+        assertThat(onEdt(() -> panel.draft())).isEqualTo(unfiltered);
+        assertThat(onEdt(grid::isLoading)).isFalse();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isFalse();
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod");
+    }
+
+    @Test
+    void emptySuggestedFieldsAreaShowsLoadingDotsWhileCalculatingAndStopsTimerWhenDone() throws Exception {
+        cachedFields.put("A", new TreeSet<>());
+        select("A");
+
+        SuggestedFieldsPanel grid = onEdt(() -> panel.suggestedFieldsPanel());
+        assertThat(onEdt(grid::rows)).isEmpty();
+        assertThat(onEdt(grid::isLoading)).isTrue();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isTrue();
+        assertThat(onEdt(grid::displayedEmptyText)).contains("...");
+
+        fieldListener.onScopeFieldSummariesUpdated(Scope.ofValues("A", Map.of()), fields("app", "pod"), false);
+        drainEdt();
+
+        assertThat(onEdt(grid::isLoading)).isFalse();
+        assertThat(onEdt(grid::isSpinnerTimerRunning)).isFalse();
+        assertThat(onEdt(() -> panel.suggestedFieldNames())).containsExactly("app", "pod");
+    }
 }

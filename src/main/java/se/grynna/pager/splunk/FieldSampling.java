@@ -96,7 +96,18 @@ public final class FieldSampling {
 
     /** The field-summary search for {@code index}, capped to the newest {@link #sampleCap} events. */
     public static String query(String index, int depth) {
-        return "search " + IndexSelection.parse(index).predicate() + " | head " + sampleCap(depth)
+        return query(Scope.ofValues(index, java.util.Map.of()), depth);
+    }
+
+    /**
+     * The field-summary search for {@code scope}, capped to the newest {@link #sampleCap} matching events.
+     * Filters by {@link SplQuery#scope(Scope)} before {@code head} and {@code fieldsummary}.
+     */
+    public static String query(Scope scope, int depth) {
+        String base = scope == null || scope.indexSelection().isNone()
+                ? "search " + IndexSelection.parse(scope == null ? null : scope.index()).predicate()
+                : SplQuery.scope(scope);
+        return base + " | head " + sampleCap(depth)
                 + " | fieldsummary maxvals=" + MAX_VALUES + " | where NOT field IN (" + EXCLUDED_FIELDS + ")";
     }
 

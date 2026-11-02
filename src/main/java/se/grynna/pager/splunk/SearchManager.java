@@ -296,6 +296,14 @@ public class SearchManager {
         return splunkClient.getUser();
     }
 
+    /**
+     * Records user or application activity so background keepalive continues for up to the
+     * configured inactivity window.
+     */
+    public void recordActivity() {
+        splunkClient.recordActivity();
+    }
+
     public void logout() {
         log.info("SearchManager logout initiated");
 
@@ -368,11 +376,27 @@ public class SearchManager {
     }
 
     /**
+     * Load field summaries for {@code scope}. Returns cached data immediately
+     * and triggers a background refresh if data is missing, stale, or {@code force} is true.
+     */
+    public SortedSet<FieldSummary> loadFieldSummariesForScope(Scope scope, boolean force) {
+        return searchFilterManager.loadFieldSummariesForScope(scope, force);
+    }
+
+    /**
      * Sample the fields of an index deeper than before (more events, further back) and refresh
      * them. Returns cached data immediately; fresh data arrives through the listener.
      */
     public SortedSet<FieldSummary> deepenFieldSummaries(String index) {
         return searchFilterManager.deepenFieldSummaries(index);
+    }
+
+    /**
+     * Sample the fields of {@code scope} deeper than before (more events, further back) and refresh
+     * them. Returns cached data immediately; fresh data arrives through the listener.
+     */
+    public SortedSet<FieldSummary> deepenFieldSummariesForScope(Scope scope) {
+        return searchFilterManager.deepenFieldSummariesForScope(scope);
     }
 
     /** The number of newest events the fields of an index are sampled from. */

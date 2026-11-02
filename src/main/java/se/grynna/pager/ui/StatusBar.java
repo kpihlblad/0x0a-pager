@@ -96,13 +96,16 @@ public class StatusBar extends JPanel {
     /** Scroll Lock symbol shown while cursor mode is off; the font check falls back to text. */
     static final String SCROLL_LOCK_GLYPH = "\u21F3";
 
-    /** Dim badge in the status row: page mode (scroll lock) is on. Hidden in cursor mode. */
+    /** Dim badge in the status row: page mode (scroll lock) is on. Blank in cursor mode, keeping its slot. */
     private final JLabel scrollLockBadge;
+    private final String scrollLockGlyph;
+    private boolean scrollLockShown;
 
     private boolean matchesMode;
     private boolean bookmarksMode;
     /** The inline event details are open over the view: the DETAILS tab is active and the row hints their keys. */
     private boolean detailsMode;
+    private boolean helpMode;
     private int bookmarkCount;
     /** LOG / MATCHES n / BOOKMARKS n / DETAILS at the left of the status row; also the view indicator. */
     private final ViewTabs viewTabs;
@@ -269,31 +272,44 @@ public class StatusBar extends JPanel {
         noticeTimer.setRepeats(false);
 
         // Shown while cursor mode is off (page mode, where the arrows scroll); a click switches cursor mode on.
-        scrollLockBadge = createLabel(font.canDisplay(SCROLL_LOCK_GLYPH.codePointAt(0)) ? SCROLL_LOCK_GLYPH : "SCRL",
-                SwingConstants.CENTER);
+        scrollLockGlyph = font.canDisplay(SCROLL_LOCK_GLYPH.codePointAt(0)) ? SCROLL_LOCK_GLYPH : "SCRL";
+        scrollLockBadge = createLabel("", SwingConstants.CENTER);
         scrollLockBadge.setForeground(DarculaColors.COMMENT);
-        scrollLockBadge.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
-        scrollLockBadge.setVisible(false);
+        // Only the glyph's width, no side padding: the size display's own padding is the gap. The slot keeps that
+        // width when the badge is blank, so the size display beside it does not move.
+        scrollLockBadge.setBorder(BorderFactory.createEmptyBorder(VPAD, 0, VPAD, 0));
+        Dimension slot = new Dimension(scrollLockBadge.getFontMetrics(font).stringWidth(scrollLockGlyph),
+                scrollLockBadge.getPreferredSize().height);
+        scrollLockBadge.setPreferredSize(slot);
+        scrollLockBadge.setMinimumSize(slot);
+        scrollLockBadge.setMaximumSize(slot);
         scrollLockBadge.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                logViewer.toggleCursorMode();
+                if (scrollLockShown) {
+                    logViewer.toggleCursorMode();
+                }
             }
         });
 
+        // Right end of the bar: the scope chips sit right-aligned before the scroll-lock slot and the size.
+        JPanel indicators = new JPanel();
+        indicators.setLayout(new BoxLayout(indicators, BoxLayout.X_AXIS));
+        indicators.setOpaque(false);
+        indicators.add(scrollLockBadge);
+        indicators.add(statusBaseDirSize);
+
         rightPanel = new JPanel(new BorderLayout(HPAD, 0));
         rightPanel.setForeground(FOREGROUND);
-        rightPanel.add(scrollLockBadge, BorderLayout.WEST);
-        rightPanel.add(statusBaseDirSize, BorderLayout.EAST);
+        rightPanel.add(indicators, BorderLayout.EAST);
+        scopeChips = new ScopeChips(font, logViewer::removeScopeTerm);
+        rightPanel.add(scopeChips, BorderLayout.CENTER);
         rightPanel.setOpaque(true);
         rightPanel.setBackground(DarculaColors.MIDNIGHT_BLUE);
 
-        // The centre keeps the scope chips and transient notices.
-        scopeChips = new ScopeChips(font, logViewer::removeScopeTerm);
         centerPanel = new JPanel(new BorderLayout(HPAD, 0));
         centerPanel.setOpaque(true);
         centerPanel.setBackground(DarculaColors.MIDNIGHT_BLUE);
-        centerPanel.add(scopeChips, BorderLayout.WEST);
         centerPanel.add(statusNotice, BorderLayout.EAST);
 
         statusRow.add(leftPanel);
@@ -315,12 +331,12 @@ public class StatusBar extends JPanel {
         promptField.setFocusable(false);
 
         // Prompt button (OK / Cancel) - only visible during boundary expansion
-        boundaryPromptButton = new JButton();
+        boundaryPromptButton = createButton(null);
         boundaryPromptButton.setFont(font);
         boundaryPromptButton.setBackground(DarculaColors.BACKGROUND);
         boundaryPromptButton.addActionListener(e -> logViewer.actionAcceptBoundaryExpansion(true));
 
-        boundaryCancelButton = new JButton();
+        boundaryCancelButton = createButton(null);
         boundaryCancelButton.setFont(font);
         boundaryCancelButton.setBackground(DarculaColors.BACKGROUND);
         boundaryCancelButton.setBorder(BorderFactory.createEmptyBorder(VPAD, 0, VPAD, 0));
@@ -335,7 +351,7 @@ public class StatusBar extends JPanel {
         setBoundaryButtonsVisible(false);
 
         // Leave search mode. Gray ×, not the red cancel — that one means "something failed".
-        searchExitButton = new JButton();
+        searchExitButton = createButton(null);
         styleChromeButton(searchExitButton, font, true);
         searchExitButton.setIcon(exitSearchIcon);
         searchExitButton.setToolTipText("Exit search (Esc)");
@@ -352,7 +368,9 @@ public class StatusBar extends JPanel {
         narrowButton.setToolTipText(MenuManager.narrowText(KeyMap.preferred()));
         narrowButton.setVisible(false);
         narrowButton.addActionListener(e -> {
-            if (selectionTerm != null) {
+            if (detailsMode) {
+                logViewer.detailsNarrowField();
+            } else if (selectionTerm != null) {
                 logViewer.narrowScopeToSelection();
             } else {
                 logViewer.narrowScopeToSearch();
@@ -363,7 +381,9 @@ public class StatusBar extends JPanel {
         excludeButton.setToolTipText(MenuManager.excludeText(KeyMap.preferred()));
         excludeButton.setVisible(false);
         excludeButton.addActionListener(e -> {
-            if (selectionTerm != null) {
+            if (detailsMode) {
+                logViewer.detailsExcludeField();
+            } else if (selectionTerm != null) {
                 logViewer.excludeSelectionFromScope();
             } else {
                 logViewer.excludeSearchFromScope();
@@ -371,39 +391,44 @@ public class StatusBar extends JPanel {
         });
         alignActionPillHeights();
 
-        bookmarksCopyButton = new JButton("Copy all");
+        bookmarksCopyButton = createButton("Copy all");
         styleChromeButton(bookmarksCopyButton, font, false);
         bookmarksCopyButton.setToolTipText("Copy all bookmarks as shown");
         bookmarksCopyButton.setVisible(false);
         bookmarksCopyButton.addActionListener(e -> logViewer.copyBookmarks());
 
-        bookmarksExportButton = new JButton("Export\u2026");
+        bookmarksExportButton = createButton("Export\u2026");
         styleChromeButton(bookmarksExportButton, font, false);
         bookmarksExportButton.setToolTipText("Export the bookmarks to a file");
         bookmarksExportButton.setVisible(false);
         bookmarksExportButton.addActionListener(e -> logViewer.showExportDialog(ExportSources.Source.BOOKMARKS));
 
-        detailsPreviousButton = new JButton("\u25C0 Prev");
+        detailsPreviousButton = createButton("\u25C0 Prev");
         styleChromeButton(detailsPreviousButton, font, false);
         detailsPreviousButton.setToolTipText(detailsStepText(KeyMap.preferred(), false));
         detailsPreviousButton.setVisible(false);
         detailsPreviousButton.addActionListener(e -> logViewer.detailsStep(false));
 
-        detailsNextButton = new JButton("Next \u25B6");
+        detailsNextButton = createButton("Next \u25B6");
         styleChromeButton(detailsNextButton, font, false);
         detailsNextButton.setToolTipText(detailsStepText(KeyMap.preferred(), true));
         detailsNextButton.setVisible(false);
         detailsNextButton.addActionListener(e -> logViewer.detailsStep(true));
 
         // Halt the query. Matches already found stay navigable.
-        searchStopButton = new JButton();
+        searchStopButton = createButton(null);
         styleChromeButton(searchStopButton, font, true);
         searchStopButton.setIcon(stopIcon);
         searchStopButton.setToolTipText("Stop search");
         searchStopButton.setVisible(false);
         searchStopButton.addActionListener(e -> logViewer.stopTextSearch());
 
-        textSearchSpinner = new SpinnerProgress();
+        textSearchSpinner = new SpinnerProgress() {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
         textSearchSpinner.setPreferredSize(new Dimension(preferredIconSize, preferredIconSize));
         textSearchSpinner.setMinimumSize(new Dimension(preferredIconSize, preferredIconSize));
         textSearchSpinner.setMaximumSize(new Dimension(preferredIconSize, preferredIconSize));
@@ -596,8 +621,22 @@ public class StatusBar extends JPanel {
         boundaryPromptYN.setVisible(promptVisible);
     }
 
+    private static JButton createButton(String text) {
+        return new JButton(text) {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
+    }
+
     private JLabel createLabel(String text, int alignment) {
-        JLabel label = new JLabel(text, alignment);
+        JLabel label = new JLabel(text, alignment) {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
         label.setForeground(FOREGROUND);
         label.setFont(font);
         label.setBorder(BorderFactory.createEmptyBorder(VPAD, HPAD, VPAD, HPAD));
@@ -724,8 +763,7 @@ public class StatusBar extends JPanel {
         }
 
         // Single blip: bright -> dim -> bright -> stop
-        final Color orangeDim = new Color((int) (DarculaColors.ORANGE.getRed() * 0.6),
-                (int) (DarculaColors.ORANGE.getGreen() * 0.6), (int) (DarculaColors.ORANGE.getBlue() * 0.6));
+        final Color orangeDim = DarculaColors.ORANGE_DIM;
         final Color orangeBright = DarculaColors.ORANGE;
 
         final int[] blipCount = {0}; // 0=bright, 1=dim, 2=bright, 3=stop
@@ -1423,6 +1461,11 @@ public class StatusBar extends JPanel {
             return;
         }
 
+        if (helpMode) {
+            setState(logViewer.isCursorMode() ? InputState.HELP_CURSOR : InputState.HELP);
+            return;
+        }
+
         if (detailsMode) {
             setState(InputState.DETAILS);
             return;
@@ -1478,6 +1521,21 @@ public class StatusBar extends JPanel {
         updateState();
     }
 
+    /** The welcome/help page is shown over a logged-in session; the prompt hints the scope and back keys. */
+    public void setHelpMode(boolean helpMode) {
+        if (this.helpMode == helpMode) {
+            return;
+        }
+        this.helpMode = helpMode;
+        applySearchChrome();
+        updateState();
+    }
+
+    /** The details Narrow or Exclude tooltip: the action, with the key that does it in details. */
+    static String detailsFieldText(String action, UiAction key, KeyMap keyMap) {
+        return action + " (" + keyMap.label(key) + ")";
+    }
+
     static String detailsStepText(KeyMap keyMap, boolean next) {
         return next
                 ? "Next event (" + keyMap.label(UiAction.DETAILS_NEXT) + ")"
@@ -1497,10 +1555,13 @@ public class StatusBar extends JPanel {
         }
     }
 
-    /** The scroll-lock badge follows cursor mode: shown in page mode, hidden while the cursor is on. */
+    /** The scroll-lock badge follows cursor mode: shown in page mode, blank while the cursor is on. */
     private void refreshScrollLock() {
-        scrollLockBadge.setVisible(!logViewer.isCursorMode());
-        scrollLockBadge.setToolTipText(scrollLockTooltip(KeyMap.preferred()));
+        scrollLockShown = !logViewer.isCursorMode();
+        scrollLockBadge.setText(scrollLockShown ? scrollLockGlyph : "");
+        scrollLockBadge.setToolTipText(scrollLockShown ? scrollLockTooltip(KeyMap.preferred()) : null);
+        scrollLockBadge.setCursor(java.awt.Cursor.getPredefinedCursor(
+                scrollLockShown ? java.awt.Cursor.HAND_CURSOR : java.awt.Cursor.DEFAULT_CURSOR));
     }
 
     static String scrollLockTooltip(KeyMap keyMap) {
@@ -1509,7 +1570,7 @@ public class StatusBar extends JPanel {
 
     /** Whether the scroll-lock badge is shown (page mode). EDT only. */
     boolean isScrollLockShown() {
-        return scrollLockBadge.isVisible();
+        return scrollLockShown;
     }
 
     /**
@@ -1589,14 +1650,22 @@ public class StatusBar extends JPanel {
         selectionSearchButton
                 .setToolTipText(RowContextMenu.searchSelectionText(selectionActions ? selectionTerm : null));
         selectionSearchButton.setVisible(selectionActions);
-        narrowButton.setToolTipText(selectionActions
-                ? RowContextMenu.narrowSelectionText(selectionTerm)
-                : MenuManager.narrowText(keyMap));
-        excludeButton.setToolTipText(selectionActions
-                ? RowContextMenu.excludeSelectionText(selectionTerm)
-                : MenuManager.excludeText(keyMap));
-        narrowButton.setVisible(selectionActions || (inSearch && !promptBlocking));
-        excludeButton.setVisible(selectionActions || (inSearch && !promptBlocking));
+        boolean detailsActions = detailsMode && !promptBlocking;
+        if (detailsMode) {
+            narrowButton.setToolTipText(
+                    detailsFieldText("Narrow scope to the field's value", UiAction.DETAILS_NARROW_FIELD, keyMap));
+            excludeButton.setToolTipText(
+                    detailsFieldText("Exclude the field's value from scope", UiAction.DETAILS_EXCLUDE_FIELD, keyMap));
+        } else {
+            narrowButton.setToolTipText(selectionActions
+                    ? RowContextMenu.narrowSelectionText(selectionTerm)
+                    : MenuManager.narrowText(keyMap));
+            excludeButton.setToolTipText(selectionActions
+                    ? RowContextMenu.excludeSelectionText(selectionTerm)
+                    : MenuManager.excludeText(keyMap));
+        }
+        narrowButton.setVisible(detailsActions || selectionActions || (inSearch && !promptBlocking));
+        excludeButton.setVisible(detailsActions || selectionActions || (inSearch && !promptBlocking));
         searchStopButton.setVisible(running && inSearch && !promptBlocking);
         textSearchSpinner.setVisible(running);
         textSearchSpinner.setIndeterminate(running);

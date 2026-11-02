@@ -327,7 +327,7 @@ public class UserLoginPanel extends JPanel {
             field.setEditable(false);
             field.setFocusable(false);
             // Visual styling: darker background and dimmed foreground
-            field.setBackground(DarculaColors.BACKGROUND.darker());
+            field.setBackground(DarculaColors.FIELD_FILL);
             field.setForeground(DarculaColors.GREY);
         }
 
@@ -343,7 +343,7 @@ public class UserLoginPanel extends JPanel {
 
             // Make field look disabled/busy
             textField.setEditable(false);
-            textField.setBackground(textField.getBackground().darker());
+            textField.setBackground(DarculaColors.FIELD_FILL);
 
             startSpinnerAnimation(textField, 1);
         }

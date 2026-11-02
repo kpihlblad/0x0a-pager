@@ -5,7 +5,9 @@ import se.grynna.pager.exceptions.StorageException;
 import se.grynna.pager.splunk.FieldSampling;
 import se.grynna.pager.splunk.FieldSummary;
 import se.grynna.pager.splunk.JobTicket;
+import se.grynna.pager.splunk.Scope;
 import se.grynna.pager.splunk.SearchManager;
+import se.grynna.pager.splunk.SplQuery;
 import se.grynna.pager.splunk.SplunkClient;
 
 import java.time.Clock;
@@ -46,6 +48,10 @@ import java.util.concurrent.TimeUnit;
 public class SearchFilterManager {
 
     static final Duration CACHE_TTL = Duration.ofMinutes(5);
+    static final int QUERY_CACHE_MAX_SIZE = 32;
+
+    private record CachedQuerySummary(String index, int depth, SortedSet<FieldSummary> summaries,
+            Instant refreshedAt) {}
 
     private final Object lock = new Object();
 
@@ -75,6 +81,12 @@ public class SearchFilterManager {
     private final Map<String, Instant> lastFieldRefresh = new HashMap<>();
     // Sample depth per index (FieldSampling); raised by deepenFieldSummaries, kept for the session
     private final Map<String, Integer> fieldDepth = new HashMap<>();
+    private final Map<String, CachedQuerySummary> queryFieldCache = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CachedQuerySummary> eldest) {
+            return size() > QUERY_CACHE_MAX_SIZE;
+        }
+    };
     private boolean closed;
 
     public SearchFilterManager(DatabaseManager databaseManager, SearchManager searchManager, Clock clock) {
@@ -124,10 +136,26 @@ public class SearchFilterManager {
         void onFieldSummariesUpdated(String index, SortedSet<FieldSummary> fieldSummaries, boolean fromCache);
 
         /**
+         * Called when field summaries are updated for {@code scope}.
+         */
+        default void onScopeFieldSummariesUpdated(Scope scope, SortedSet<FieldSummary> fieldSummaries,
+                boolean fromCache) {
+            onFieldSummariesUpdated(scope == null ? null : scope.index(), fieldSummaries, fromCache);
+        }
+
+        /**
          * Called when the current field-summary refresh for {@code index} fails. Not
          * called for superseded refreshes or after shutdown.
          */
         default void onFieldSummaryRefreshFailed(String index, Throwable error) {}
+
+        /**
+         * Called when the current field-summary refresh for {@code scope} fails. Not
+         * called for superseded refreshes or after shutdown.
+         */
+        default void onScopeFieldSummaryRefreshFailed(Scope scope, Throwable error) {
+            onFieldSummaryRefreshFailed(scope == null ? null : scope.index(), error);
+        }
     }
 
     /**
@@ -137,12 +165,22 @@ public class SearchFilterManager {
      */
     private static final class RefreshTask<T> {
         private final String index;
+        private final Scope scope;
+        private final String queryKey;
+        private final boolean explicitScope;
         private final CompletableFuture<T> result = new CompletableFuture<>();
         private final JobTicket ticket = new JobTicket();
         private Future<?> worker;
 
         private RefreshTask(String index) {
+            this(index, Scope.ofValues(index, Map.of()), false);
+        }
+
+        private RefreshTask(String index, Scope scope, boolean explicitScope) {
             this.index = index;
+            this.scope = scope;
+            this.queryKey = scope == null || scope.indexSelection().isNone() ? "" : SplQuery.scope(scope);
+            this.explicitScope = explicitScope;
         }
 
         private void cancel(SplunkClient client) {
@@ -288,20 +326,49 @@ public class SearchFilterManager {
             log.debug("getFieldSummaries: Empty index, returning empty list");
             return Collections.emptySortedSet();
         }
+        return loadFieldSummaries(Scope.ofValues(index, Map.of()), forceRefresh, false);
+    }
 
-        var result = databaseManager.loadFieldSummaries(index);
+    /**
+     * Get the cached field summaries for {@code scope} and refresh them in the background when needed.
+     * Summaries are cached in memory per effective query string ({@link SplQuery#scope(Scope)}) at the index's
+     * current sample depth and expire after {@link #CACHE_TTL}. For an unfiltered index scope, persisted database
+     * summaries are returned immediately while a stale refresh runs.
+     */
+    public SortedSet<FieldSummary> loadFieldSummariesForScope(Scope scope, boolean forceRefresh) {
+        if (scope == null || scope.index() == null || scope.index().trim().isEmpty()) {
+            return Collections.emptySortedSet();
+        }
+        return loadFieldSummaries(scope, forceRefresh, true);
+    }
+
+    private SortedSet<FieldSummary> loadFieldSummaries(Scope scope, boolean forceRefresh, boolean explicitScope) {
+        String index = scope.index();
+        String queryKey = SplQuery.scope(scope);
+        boolean unfiltered = isUnfiltered(scope);
+
+        SortedSet<FieldSummary> dbCached = unfiltered
+                ? databaseManager.loadFieldSummaries(index)
+                : Collections.emptySortedSet();
 
         synchronized (lock) {
-            boolean running = fieldTask != null && fieldTask.index.equals(index);
-            boolean fresh = isFresh(lastFieldRefresh.get(index));
-            if (forceRefresh || (!running && (result.isEmpty() || !fresh))) {
-                log.debug("getFieldSummaries: Triggering refresh for index={} size={}", index, result.size());
-                startFieldSummaryRefresh(index);
+            int depth = fieldDepth.getOrDefault(index, 0);
+            CachedQuerySummary memCached = queryFieldCache.get(queryKey);
+            boolean memHit = memCached != null && memCached.depth() == depth && isFresh(memCached.refreshedAt());
+            SortedSet<FieldSummary> result = memHit ? memCached.summaries() : dbCached;
+            boolean fresh = memHit || (unfiltered && !dbCached.isEmpty() && isFresh(lastFieldRefresh.get(index)));
+            boolean running = fieldTask != null && fieldTask.queryKey.equals(queryKey);
+            if (forceRefresh || (!running && !fresh)) {
+                log.debug("getFieldSummaries: Triggering refresh for query='{}' size={}", queryKey, result.size());
+                startFieldSummaryRefresh(scope, explicitScope);
             }
+            log.debug("getFieldSummaries: Returning {} cached items for query='{}'", result.size(), queryKey);
+            return result;
         }
+    }
 
-        log.debug("getFieldSummaries: Returning {} cached items", result.size());
-        return result;
+    private static boolean isUnfiltered(Scope scope) {
+        return scope.manualSpl() == null && scope.fieldFilters().isEmpty() && !scope.hasTerms();
     }
 
     /**
@@ -315,13 +382,49 @@ public class SearchFilterManager {
         if (index == null || index.trim().isEmpty()) {
             return Collections.emptySortedSet();
         }
+        return deepenFieldSummaries(Scope.ofValues(index, Map.of()), false);
+    }
+
+    /**
+     * Sample the fields of {@code scope} one level deeper than before, invalidating cached query summaries for its
+     * index selection so subsequent queries re-sample at the new depth.
+     */
+    public SortedSet<FieldSummary> deepenFieldSummariesForScope(Scope scope) {
+        if (scope == null || scope.index() == null || scope.index().trim().isEmpty()) {
+            return Collections.emptySortedSet();
+        }
+        return deepenFieldSummaries(scope, true);
+    }
+
+    private SortedSet<FieldSummary> deepenFieldSummaries(Scope scope, boolean explicitScope) {
+        String index = scope.index();
         synchronized (lock) {
             int depth = FieldSampling.clampDepth(fieldDepth.getOrDefault(index, 0) + 1);
             fieldDepth.put(index, depth);
+            invalidateFieldCacheForIndex(index);
             log.info("deepenFieldSummaries: index={} depth={} sample={}", index, depth,
                     FieldSampling.sampleCap(depth));
         }
-        return loadFieldSummaries(index, true);
+        return loadFieldSummaries(scope, true, explicitScope);
+    }
+
+    /**
+     * Drops cached query field summaries for {@code index} (or all indexes when {@code index} is null).
+     */
+    public void invalidateFieldCache(String index) {
+        synchronized (lock) {
+            if (index == null) {
+                queryFieldCache.clear();
+                lastFieldRefresh.clear();
+            } else {
+                invalidateFieldCacheForIndex(index);
+                lastFieldRefresh.remove(index);
+            }
+        }
+    }
+
+    private void invalidateFieldCacheForIndex(String index) {
+        queryFieldCache.values().removeIf(entry -> index.equals(entry.index()));
     }
 
     /** The number of newest events the fields of {@code index} are sampled from. */
@@ -334,53 +437,66 @@ public class SearchFilterManager {
     /**
      * Start a field-summary refresh, superseding any running one. Caller holds {@link #lock}.
      */
-    private void startFieldSummaryRefresh(String index) {
+    private void startFieldSummaryRefresh(Scope scope, boolean explicitScope) {
         if (closed) {
             return;
         }
         if (fieldTask != null) {
-            log.info("startFieldSummaryRefresh: Superseding running refresh for {}", fieldTask.index);
+            log.info("startFieldSummaryRefresh: Superseding running refresh for {}", fieldTask.queryKey);
             fieldTask.cancel(searchManager.getSplunkClient());
         }
-        var task = new RefreshTask<SortedSet<FieldSummary>>(index);
+        var task = new RefreshTask<SortedSet<FieldSummary>>(scope.index(), scope, explicitScope);
         fieldTask = task;
         task.worker = executorService.submit(() -> runFieldSummaryRefresh(task));
     }
 
     private void runFieldSummaryRefresh(RefreshTask<SortedSet<FieldSummary>> task) {
         String index = task.index;
+        Scope scope = task.scope;
         try {
             int depth;
             synchronized (lock) {
                 depth = fieldDepth.getOrDefault(index, 0);
             }
-            var newFieldSummaries = searchManager.getSplunkClient().loadFieldSummary(index, depth,
-                    searchManager.getFieldProgressCallback(), task.ticket);
+            var newFieldSummaries = task.explicitScope
+                    ? searchManager.getSplunkClient().loadFieldSummaryForScope(scope, depth,
+                            searchManager.getFieldProgressCallback(), task.ticket)
+                    : searchManager.getSplunkClient().loadFieldSummary(index, depth,
+                            searchManager.getFieldProgressCallback(), task.ticket);
             SortedSet<FieldSummary> result;
             synchronized (lock) {
                 if (fieldTask != task || closed) {
                     log.info("job FieldSummaryRefresh: Superseded, discarding {} summaries for {}",
-                            newFieldSummaries.size(), index);
+                            newFieldSummaries.size(), task.queryKey);
                     task.result.cancel(false);
                     return;
                 }
-                databaseManager.storeFieldSummaries(index, newFieldSummaries);
-                result = databaseManager.loadFieldSummaries(index);
-                lastFieldRefresh.put(index, clock.instant());
+                Instant now = clock.instant();
+                if (isUnfiltered(scope)) {
+                    databaseManager.storeFieldSummaries(index, newFieldSummaries);
+                    SortedSet<FieldSummary> loaded = databaseManager.loadFieldSummaries(index);
+                    result = loaded.isEmpty() ? new TreeSet<>(newFieldSummaries) : loaded;
+                    lastFieldRefresh.put(index, now);
+                } else {
+                    result = Collections.unmodifiableSortedSet(new TreeSet<>(newFieldSummaries));
+                }
+                queryFieldCache.put(task.queryKey, new CachedQuerySummary(index, depth,
+                        Collections.unmodifiableSortedSet(new TreeSet<>(result)), now));
                 fieldTask = null;
                 log.debug("job FieldSummaryRefresh: Completed with {}({}) fields for {}", result.size(),
-                        newFieldSummaries.size(), index);
-                notifyFieldSummariesUpdated(index, result);
+                        newFieldSummaries.size(), task.queryKey);
+                notifyFieldSummariesUpdated(task, result);
             }
             task.result.complete(result);
         } catch (Throwable e) {
             synchronized (lock) {
                 if (fieldTask == task && !closed) {
                     fieldTask = null;
-                    log.error("job FieldSummaryRefresh: Failed for index {}", index, e);
-                    notifyFieldSummaryRefreshFailed(index, e);
+                    log.error("job FieldSummaryRefresh: Failed for query {}", task.queryKey, e);
+                    notifyFieldSummaryRefreshFailed(task, e);
                 } else {
-                    log.info("job FieldSummaryRefresh: Superseded refresh for {} ended: {}", index, e.toString());
+                    log.info("job FieldSummaryRefresh: Superseded refresh for {} ended: {}", task.queryKey,
+                            e.toString());
                 }
             }
             task.result.completeExceptionally(e);
@@ -591,25 +707,34 @@ public class SearchFilterManager {
         }
     }
 
-    private void notifyFieldSummariesUpdated(String index, SortedSet<FieldSummary> fieldSummaries) {
+    private void notifyFieldSummariesUpdated(RefreshTask<SortedSet<FieldSummary>> task,
+            SortedSet<FieldSummary> fieldSummaries) {
         var listener = searchManager.getFieldSummaryUpdateListener();
         if (listener == null) {
             return;
         }
         try {
-            listener.onFieldSummariesUpdated(index, fieldSummaries, false);
+            if (task.explicitScope) {
+                listener.onScopeFieldSummariesUpdated(task.scope, fieldSummaries, false);
+            } else {
+                listener.onFieldSummariesUpdated(task.index, fieldSummaries, false);
+            }
         } catch (RuntimeException e) {
             log.warn("notifyFieldSummariesUpdated: Listener failed", e);
         }
     }
 
-    private void notifyFieldSummaryRefreshFailed(String index, Throwable error) {
+    private void notifyFieldSummaryRefreshFailed(RefreshTask<SortedSet<FieldSummary>> task, Throwable error) {
         var listener = searchManager.getFieldSummaryUpdateListener();
         if (listener == null) {
             return;
         }
         try {
-            listener.onFieldSummaryRefreshFailed(index, error);
+            if (task.explicitScope) {
+                listener.onScopeFieldSummaryRefreshFailed(task.scope, error);
+            } else {
+                listener.onFieldSummaryRefreshFailed(task.index, error);
+            }
         } catch (RuntimeException e) {
             log.warn("notifyFieldSummaryRefreshFailed: Listener failed", e);
         }

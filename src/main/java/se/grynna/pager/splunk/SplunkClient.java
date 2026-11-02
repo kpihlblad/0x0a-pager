@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -82,6 +83,17 @@ public class SplunkClient {
     /** Read timeout of every request; all long operations poll, so no request should take longer. */
     static final int READ_TIMEOUT_MS = 60_000;
     static final int CONNECT_TIMEOUT_MS = 20_000;
+
+    /** Interval between background session keepalive requests. */
+    static final Duration KEEPALIVE_INTERVAL = Duration.ofMinutes(5);
+    /** Longest stretch of application inactivity during which keepalive continues to refresh the session. */
+    static final Duration MAX_KEEPALIVE_INACTIVITY = Duration.ofHours(4);
+    /** Authenticated in-memory splunkd endpoint that touches the session without starting a search job. */
+    static final String KEEPALIVE_PATH = "authentication/current-context";
+
+    private volatile Instant lastActivity;
+    private final Object keepAliveLock = new Object();
+    private ScheduledExecutorService keepAliveExecutor;
 
     /**
      * Delays between the cancel passes of one ticket while a cancel is unconfirmed (failed, or
@@ -209,6 +221,7 @@ public class SplunkClient {
         this.port = port;
         this.user = user;
         this.clock = clock;
+        this.lastActivity = clock.instant();
         this.certificateDecisionProvider = certificateDecisionProvider;
         this.certificatePinStore = certificatePinStore != null ? certificatePinStore : new CertificatePinStore();
 
@@ -221,6 +234,7 @@ public class SplunkClient {
 
         this.service = createService(host, port, user, pass);
         serviceGeneration.incrementAndGet();
+        startKeepAlive(KEEPALIVE_INTERVAL);
         log.debug("login successful: {}", service.getInfo().getServerName());
     }
 
@@ -233,6 +247,7 @@ public class SplunkClient {
         this.port = 8089;
         this.user = "test";
         this.clock = clock;
+        this.lastActivity = clock.instant();
         this.certificateDecisionProvider = null;
         this.certificatePinStore = new CertificatePinStore();
     }
@@ -519,6 +534,99 @@ public class SplunkClient {
 
             this.service = reconnectedService;
             serviceGeneration.incrementAndGet();
+            recordActivity();
+        }
+    }
+
+    /**
+     * Records user or application activity so background keepalive continues for up to
+     * {@link #MAX_KEEPALIVE_INACTIVITY} from this instant. Safe to call from any thread,
+     * including the EDT.
+     */
+    public void recordActivity() {
+        this.lastActivity = clock.instant();
+    }
+
+    Instant lastActivity() {
+        return lastActivity;
+    }
+
+    /**
+     * Starts periodic session keepalive at {@code interval}. Stopped by {@link #markShuttingDown()}.
+     */
+    void startKeepAlive(Duration interval) {
+        long millis = Math.max(1L, interval.toMillis());
+        synchronized (keepAliveLock) {
+            if (shuttingDown) {
+                return;
+            }
+            if (keepAliveExecutor != null) {
+                keepAliveExecutor.shutdownNow();
+            }
+            keepAliveExecutor = Executors.newSingleThreadScheduledExecutor(
+                    Thread.ofPlatform().daemon(true).name("pager-keepalive-", 0).factory());
+            keepAliveExecutor.scheduleWithFixedDelay(this::keepAliveTick, millis, millis, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void stopKeepAlive() {
+        ScheduledExecutorService executor;
+        synchronized (keepAliveLock) {
+            executor = keepAliveExecutor;
+            keepAliveExecutor = null;
+        }
+        if (executor != null) {
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * One quiet keepalive check: touches {@link #KEEPALIVE_PATH} on the active session while not
+     * shutting down, not waiting on a recovery prompt, and within {@link #MAX_KEEPALIVE_INACTIVITY}
+     * of {@link #lastActivity}. Never prompts or throws.
+     *
+     * @return {@code true} if the keepalive request was sent and succeeded
+     */
+    boolean keepAliveTick() {
+        Service current = service;
+        if (shuttingDown || current == null || isRecoveryInFlight()) {
+            return false;
+        }
+        Instant now = clock.instant();
+        Duration idle = Duration.between(lastActivity, now);
+        if (idle.compareTo(MAX_KEEPALIVE_INACTIVITY) > 0) {
+            log.debug("Skipping Splunk keepalive after {} of inactivity", idle);
+            return false;
+        }
+        try {
+            ResponseMessage response = current.get(KEEPALIVE_PATH);
+            closeKeepAliveResponse(response);
+            log.debug("Splunk keepalive succeeded");
+            return true;
+        } catch (Throwable e) {
+            log.debug("Splunk keepalive failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean isRecoveryInFlight() {
+        synchronized (reloginLock) {
+            return inFlightRecovery != null && !inFlightRecovery.isDone();
+        }
+    }
+
+    private static void closeKeepAliveResponse(ResponseMessage response) {
+        if (response == null) {
+            return;
+        }
+        InputStream content = response.getContent();
+        if (content == null) {
+            return;
+        }
+        try (content) {
+            content.readNBytes(CREATE_RESPONSE_LIMIT);
+        } catch (IOException e) {
+            log.debug("Could not drain keepalive response: {}", e.toString());
         }
     }
 
@@ -529,6 +637,7 @@ public class SplunkClient {
     private <T> T withRecovery(String operation, SplunkOperation<T> action)
             throws SearchException, TemporarySearchException, SearchResultToBigException, SearchCancelledException {
         failIfDispatchThread();
+        recordActivity();
         long operationGeneration = serviceGeneration.get();
 
         try {
@@ -815,6 +924,7 @@ public class SplunkClient {
         log.info("Marking SplunkClient as shutting down");
         shuttingDown = true;
         reloginProvider = NOOP_RELOGIN_PROVIDER;
+        stopKeepAlive();
 
         CompletableFuture<Void> recovery;
         CompletableFuture<?> passwordRequest;
@@ -943,7 +1053,17 @@ public class SplunkClient {
     /** Like {@link #loadFieldSummary(String, int, ProgressCallback)}, cancellable through {@link #cancelJobs}. */
     public SortedSet<FieldSummary> loadFieldSummary(String index, int depth, ProgressCallback progressCallback,
             JobTicket ticket) throws TemporarySearchException, SearchException, SearchCancelledException {
+        return loadFieldSummaryForScope(Scope.ofValues(index, Map.of()), depth, progressCallback, ticket);
+    }
 
+    /**
+     * Load field summaries for {@code scope} with automatic session recovery. Samples the newest matching events
+     * within windows anchored at the index selection's newest event ({@link FieldSampling}), cancellable through
+     * {@link #cancelJobs}.
+     */
+    public SortedSet<FieldSummary> loadFieldSummaryForScope(Scope scope, int depth, ProgressCallback progressCallback,
+            JobTicket ticket) throws TemporarySearchException, SearchException, SearchCancelledException {
+        String index = scope == null ? null : scope.index();
         return withRecovery("loadFieldSummary", () -> {
             awaitEarlierAttempts(ticket);
             SortedSet<FieldSummary> fieldSummaries = new TreeSet<>();
@@ -953,7 +1073,7 @@ public class SplunkClient {
                 return fieldSummaries;
             }
             Instant end = FieldSampling.windowEnd(anchor.get());
-            String query = FieldSampling.query(index, depth);
+            String query = FieldSampling.query(scope, depth);
 
             for (int step = 0; step < FieldSampling.STEPS; step++) {
                 if (Thread.currentThread().isInterrupted()) {

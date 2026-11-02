@@ -31,11 +31,15 @@ import se.grynna.pager.ui.preferences.DateTimeFormatterManager;
 import se.grynna.pager.ui.preferences.PreferencesPanel;
 import se.grynna.pager.ui.sprattel.LoadingAnimationTimer;
 import se.grynna.pager.ui.time.TimePanel;
+import se.grynna.pager.utils.DarculaColors;
+import se.grynna.pager.utils.Theme;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.time.Clock;
 import java.time.Instant;
@@ -111,9 +115,9 @@ public class LogViewer extends JPanel
 
     private final Object logLock;
 
-    /** True when the welcome screen (Mood) is shown — search and goto are disabled */
+    /** True when the welcome/help screen (Mood) is shown — search and goto are disabled */
     private boolean isInMoodMode() {
-        return logProvider instanceof Mood;
+        return helpOpen || logProvider instanceof Mood;
     }
 
     public static final int VPAD = 0;
@@ -127,6 +131,9 @@ public class LogViewer extends JPanel
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     /** Periodic disk-usage status update; scheduled in addNotify, cancelled in removeNotify. EDT-confined. */
     private ScheduledFuture<?> diskUsageUpdate;
+    private static final long ACTIVITY_EVENT_MASK = AWTEvent.KEY_EVENT_MASK | AWTEvent.MOUSE_EVENT_MASK
+            | AWTEvent.MOUSE_MOTION_EVENT_MASK | AWTEvent.MOUSE_WHEEL_EVENT_MASK;
+    private final AWTEventListener activityListener = this::onUserInputEvent;
 
     private final FloatingScrollBar scrollBar;
     /** Match-density strip over the right edge of the log, fed by {@link #updateMinimap()}; it scrolls the log. */
@@ -235,7 +242,8 @@ public class LogViewer extends JPanel
     private IndexPanel indexPanel;
     private JPanel loginOverlay; // Semi-transparent overlay for login panel
     private JPanel preferencesOverlay; // Semi-transparent overlay for preferences panel
-    private JPanel helpOverlay; // Semi-transparent overlay for the keyboard help
+    private boolean helpOpen; // True while Mood is shown as keyboard help over a session
+    private CursorManager.ViewState helpOriginState; // Viewport held before opening help, restored on close
     private TimePanel timePanel; // The time drawer over the bottom of the log, null when closed
     private final Config config = new Config();
 
@@ -282,7 +290,7 @@ public class LogViewer extends JPanel
 
         this.clock = clock;
         this.logLock = new Object();
-        this.mood = new Mood(clock);
+        this.mood = new Mood(clock, this::moodLoginInstruction);
         this.logProvider = mood;
 
         // Initialize DateTimeFormatterManager FIRST before creating any UI components
@@ -341,6 +349,7 @@ public class LogViewer extends JPanel
 
         inputHandler = new InputHandler(cursorManager, this);
         inputHandler.setup(viewPanel, this);
+        mood.refresh(KeyMap.preferred(), inputHandler.boundActions());
         minimap.setNavigator(this::centerOnMinimapPosition);
         // The strip takes the mouse, so the wheel over it goes to the log's own wheel handler.
         minimap.addMouseWheelListener(e -> viewPanel.dispatchEvent(SwingUtilities.convertMouseEvent(minimap, e,
@@ -370,9 +379,6 @@ public class LogViewer extends JPanel
                 if (preferencesOverlay != null) {
                     preferencesOverlay.setBounds(0, 0, size.width, size.height);
                 }
-                if (helpOverlay != null) {
-                    helpOverlay.setBounds(0, 0, size.width, size.height);
-                }
                 layoutTimePanel();
                 detailsPanel.setBounds(0, 0, size.width, size.height);
                 layoutMinimap();
@@ -401,10 +407,12 @@ public class LogViewer extends JPanel
                     statusBar::setBaseDirSize, SwingUtilities::invokeLater), 0, 30,
                     java.util.concurrent.TimeUnit.SECONDS);
         }
+        Toolkit.getDefaultToolkit().addAWTEventListener(activityListener, ACTIVITY_EVENT_MASK);
     }
 
     @Override
     public void removeNotify() {
+        Toolkit.getDefaultToolkit().removeAWTEventListener(activityListener);
         // addNotify/removeNotify can repeat (e.g. frame re-realization), so only
         // cancel the task here; addNotify reschedules it on the same executor.
         if (diskUsageUpdate != null) {
@@ -414,13 +422,36 @@ public class LogViewer extends JPanel
         super.removeNotify();
     }
 
+    @Override
+    public void recordActivity() {
+        SearchManager sm = searchManager;
+        if (sm != null) {
+            sm.recordActivity();
+        }
+    }
+
+    private void onUserInputEvent(AWTEvent event) {
+        int id = event.getID();
+        if (id == KeyEvent.KEY_PRESSED || id == MouseEvent.MOUSE_PRESSED || id == MouseEvent.MOUSE_DRAGGED
+                || id == MouseEvent.MOUSE_WHEEL) {
+            recordActivity();
+        }
+    }
+
+    private String moodLoginInstruction() {
+        KeyMap keyMap = KeyMap.preferred();
+        return searchManager == null && logProvider instanceof Mood
+                ? Mood.loginInstruction(keyMap)
+                : Mood.loggedInInstruction(keyMap);
+    }
+
     /**
      * Centers the view on the "Press L to login" instruction line when showing the Mood provider.
      * Uses golden ratio positioning and temporary highlight.
      */
     private void centerOnMoodLoginInstruction() {
-        if (logProvider instanceof Mood moodProvider) {
-            int loginLine = moodProvider.getLoginInstructionLine();
+        if (isInMoodMode()) {
+            int loginLine = mood.getLoginInstructionLine();
             cursorManager.gotoLine(loginLine);
         }
     }
@@ -430,18 +461,20 @@ public class LogViewer extends JPanel
         try {
             lastVisibleLinesFailure = null;
             visibleLines = cursorManager.getVisibleLines();
-            if (viewMode == ViewMode.MATCHES && matchesProvider != null) {
-                decorateEventRows(matchesProvider, visibleLines);
-            } else if (viewMode == ViewMode.BOOKMARKS && bookmarksProvider != null) {
-                decorateEventRows(bookmarksProvider, visibleLines);
-            }
-            // Every row of the Bookmarks view is bookmarked: no per-row mark there.
-            if (viewMode != ViewMode.BOOKMARKS) {
-                decorateBookmarks(visibleLines, bookmarks);
+            if (!isInMoodMode()) {
+                if (viewMode == ViewMode.MATCHES && matchesProvider != null) {
+                    decorateEventRows(matchesProvider, visibleLines);
+                } else if (viewMode == ViewMode.BOOKMARKS && bookmarksProvider != null) {
+                    decorateEventRows(bookmarksProvider, visibleLines);
+                }
+                // Every row of the Bookmarks view is bookmarked: no per-row mark there.
+                if (viewMode != ViewMode.BOOKMARKS) {
+                    decorateBookmarks(visibleLines, bookmarks);
+                }
             }
 
             // Get loaded segment statistics
-            var logStatistics = logProvider.getStatistics();
+            var logStatistics = activeProvider().getStatistics();
 
             if (log.isTraceEnabled()) {
                 log.trace("Visible lines start time: {}",
@@ -466,27 +499,30 @@ public class LogViewer extends JPanel
             }
 
             scrollBar.setMaxLineLength(maxLen);
-            statusBar.setFirstVisibleTimestamp(firstTimestamp);
+            if (!helpOpen) {
+                statusBar.setFirstVisibleTimestamp(firstTimestamp);
+            }
             statusBar.setSelectionSpan(selectionSpanOrNull());
             statusBar.setSelectionTerm(selectionTermOrNull());
-            if (isEventDispatchThread()) {
+            if (isEventDispatchThread() && !helpOpen) {
                 pushBrowsingRange();
             }
 
             // Scrolling or moving the cursor clears the navigation highlight.
             // The "no more matches" note belongs to that highlight, not to the new viewport.
             // In the Matches view the cursor is the selection, not the F3 highlight.
-            if (isEventDispatchThread() && viewMode == ViewMode.LOG && !cursorManager.hasNavigationHighlight()) {
+            if (isEventDispatchThread() && !helpOpen && viewMode == ViewMode.LOG
+                    && !cursorManager.hasNavigationHighlight()) {
                 searchNavigation.releaseStuck();
                 statusBar.clearSearchPosition();
             }
             // Scrolling or moving the cursor before the first match is known means
             // the user took over; an automatic jump must not yank the view away.
-            if (isEventDispatchThread() && pendingFirstMatchSession != null
+            if (isEventDispatchThread() && !helpOpen && pendingFirstMatchSession != null
                     && !Objects.equals(firstVisibleSearchHit, pendingFirstMatchAnchor)) {
                 clearFirstMatchJump();
             }
-            if (isEventDispatchThread() && (detailsOpen || pendingDetailsReopen != null)) {
+            if (isEventDispatchThread() && !helpOpen && (detailsOpen || pendingDetailsReopen != null)) {
                 syncDetails();
             }
 
@@ -671,6 +707,7 @@ public class LogViewer extends JPanel
         }
         var linesPerPage = Math.max(1, viewPanel.getHeight() / charSize.height);
         var charsPerLine = Math.max(1, viewPanel.getWidth() / charSize.width);
+        syncMoodSkyWidth();
         cursorManager.updateSize(linesPerPage, charsPerLine);
 
         // Center on login instruction when Mood is first displayed with valid dimensions
@@ -680,6 +717,17 @@ public class LogViewer extends JPanel
             SwingUtilities.invokeLater(this::centerOnMoodLoginInstruction);
         } else {
             updateVisibleLines();
+        }
+    }
+
+    private void syncMoodSkyWidth() {
+        if (charSize == null || viewPanel == null || viewPanel.getWidth() <= 0) {
+            return;
+        }
+        int visibleTextCols = (viewPanel.getWidth() - LineRenderer.iconSpaceWidth(charSize.height)) / charSize.width;
+        int visibleMsgCols = visibleTextCols - DecoratedLogLine.getPreambleLength();
+        if (visibleMsgCols > 0) {
+            mood.setSkyWidth(visibleMsgCols);
         }
     }
 
@@ -898,6 +946,7 @@ public class LogViewer extends JPanel
         if (!isEventDispatchThread()) {
             throw new IllegalStateException("showIndexPanel must be called on the EDT");
         }
+        closeKeyboardHelp();
         closeDetails();
         closeTimePanel();
         statusBar.setModalIndex(true);
@@ -952,6 +1001,7 @@ public class LogViewer extends JPanel
             throw new IllegalStateException("showLoginOverlay must be called on the EDT");
         }
 
+        closeKeyboardHelp();
         closeDetails();
         // Replace any existing overlay; the modal-login state follows the overlay
         closeLoginOverlay();
@@ -984,7 +1034,7 @@ public class LogViewer extends JPanel
                     g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
                     g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.80f));
-                    g2d.setColor(new Color(20, 20, 20));
+                    g2d.setColor(DarculaColors.VEIL);
                     g2d.fillRect(0, 0, getWidth(), getHeight());
                 } finally {
                     g2d.dispose();
@@ -1188,6 +1238,9 @@ public class LogViewer extends JPanel
             throw new IllegalStateException("handleLogout must be called on the EDT");
         }
 
+        helpOpen = false;
+        helpOriginState = null;
+        statusBar.setHelpMode(false);
         closeDetails();
         pendingDetailsReopen = null;
 
@@ -1304,6 +1357,9 @@ public class LogViewer extends JPanel
 
             inputHandler.seedClipboard();
 
+            helpOpen = false;
+            helpOriginState = null;
+            statusBar.setHelpMode(false);
             closeDetails();
             pendingDetailsReopen = null;
             // A new provider replaces any Matches or Bookmarks view.
@@ -1426,6 +1482,7 @@ public class LogViewer extends JPanel
 
     @Override
     public void toggleMatches() {
+        closeKeyboardHelp();
         if (isInMoodMode()) return;
 
         SearchSession session = currentSearchSession();
@@ -2000,8 +2057,11 @@ public class LogViewer extends JPanel
         return TimeTooltip.text(loaded.getDisplayTime());
     }
 
-    /** The provider the view paints: the Matches snapshot or the bookmarks in their views, else the log. */
+    /** The provider the view paints: Mood while help is open, the Matches/Bookmarks snapshot, else the log. */
     private LogDataProvider activeProvider() {
+        if (helpOpen) {
+            return mood;
+        }
         EventListProvider list = eventListProvider();
         return list != null ? list : logProvider;
     }
@@ -2023,11 +2083,17 @@ public class LogViewer extends JPanel
     }
 
     /**
-     * The LOG tab: leave every event-list view for the log, restoring the log viewport held before the first of
-     * them was entered. Does nothing in the log itself or while the welcome screen is shown.
+     * The LOG tab: leave every event-list view (and help) for the log, restoring the log viewport held before the
+     * first of them was entered. Does nothing in the log itself or while the welcome screen is shown.
      */
     public void showLog() {
-        if (viewMode == ViewMode.LOG || isInMoodMode()) return;
+        boolean closedHelp = closeKeyboardHelp();
+        if (viewMode == ViewMode.LOG || isInMoodMode()) {
+            if (closedHelp) {
+                updateVisibleLines();
+            }
+            return;
+        }
         leaveEventViews();
         updateVisibleLines();
     }
@@ -2144,6 +2210,7 @@ public class LogViewer extends JPanel
 
     @Override
     public void showBookmarks() {
+        closeKeyboardHelp();
         if (viewMode == ViewMode.BOOKMARKS || isInMoodMode()) return;
         enterBookmarks();
     }
@@ -2718,12 +2785,14 @@ public class LogViewer extends JPanel
         statusBar.updateSearchHitCount(shown.snapshot().size(), session.getState() != State.RUNNING,
                 session.windowStart(), session.windowEnd());
 
-        if (viewMode == ViewMode.MATCHES) {
-            // Refresh the matches rows and keep the anchor still.
-            refreshMatches(session);
-        } else {
-            // Only after the status reflects the new hits: the jump publishes "n of m".
-            jumpToFirstMatch(session);
+        if (!helpOpen) {
+            if (viewMode == ViewMode.MATCHES) {
+                // Refresh the matches rows and keep the anchor still.
+                refreshMatches(session);
+            } else {
+                // Only after the status reflects the new hits: the jump publishes "n of m".
+                jumpToFirstMatch(session);
+            }
         }
 
         if (session.getState() != State.RUNNING) {
@@ -3428,109 +3497,94 @@ public class LogViewer extends JPanel
                 });
     }
 
+    /** Switches between the dark and the light theme while the application runs, and remembers the choice. */
+    public void toggleLightMode() {
+        Theme next = isLightMode() ? Theme.DARK : Theme.LIGHT;
+        ThemeSwitch.apply(next);
+        config.setTheme(next);
+    }
+
+    public boolean isLightMode() {
+        return DarculaColors.theme() == Theme.LIGHT;
+    }
+
     @Override
     public void showPreferences() {
         showPreferencesOverlay();
     }
 
     /**
-     * Toggles the keyboard help overlay. Unlike the preferences overlay, this one
-     * does not disable the view panel or steal focus: it stays driven by the
-     * global key bindings so Esc/Ctrl-G close it through the cancel chain and
-     * {@code h} toggles it back off.
+     * Toggles the keyboard help view (Mood) in the main viewer. When already on the initial
+     * welcome screen, re-centres on the login/help instruction line; when logged in, swaps
+     * to Mood while remembering the previous view state so {@code h} or Esc restores it.
      */
     @Override
     public void showKeyboardHelp() {
-        if (helpOverlay != null) {
-            closeHelpOverlay();
+        if (helpOpen) {
+            closeKeyboardHelp();
         } else {
-            showHelpOverlay();
+            openKeyboardHelp();
         }
     }
 
     /**
-     * Closes the keyboard help overlay if it is shown, as the first step of the
-     * cancel chain (the view is re-enabled and repainted when the overlay goes).
+     * Closes the keyboard help view if it was opened over a session, restoring the previous
+     * view and viewport as the second step of the cancel chain.
      */
     @Override
     public boolean closeKeyboardHelp() {
-        if (helpOverlay == null) {
+        if (!helpOpen) {
             return false;
         }
-        closeHelpOverlay();
+        helpOpen = false;
+        CursorManager.ViewState restore = helpOriginState;
+        helpOriginState = null;
+        statusBar.setHelpMode(false);
+
+        if (viewMode == ViewMode.MATCHES && matchesProvider != null) {
+            restoreMatches(restore);
+        } else if (restore != null) {
+            cursorManager.swapProvider(activeProvider(), restore);
+        } else {
+            cursorManager.swapProvider(activeProvider(), null);
+        }
+        updateVisibleLines();
+        if (!helpOpen && viewMode == ViewMode.LOG) {
+            SearchSession session = currentSearchSession();
+            if (session != null && statusBar.isSearchActive()) {
+                jumpToFirstMatch(session);
+                offerExtendForNoMatches(session);
+            }
+        }
+        viewPanel.requestFocusInWindow();
         return true;
     }
 
-    private void showHelpOverlay() {
+    private void openKeyboardHelp() {
         if (!isEventDispatchThread()) {
-            SwingUtilities.invokeLater(this::showHelpOverlay);
+            SwingUtilities.invokeLater(this::openKeyboardHelp);
             return;
         }
-
-        // Remove any existing help overlay before adding the fresh one.
-        if (helpOverlay != null) {
-            layeredPane.remove(helpOverlay);
-        }
-
-        // Semi-transparent overlay that blocks mouse input; keyboard stays on the
-        // view panel so the cancel chain and `h` toggle keep working.
-        helpOverlay = new JPanel() {
-            {
-                enableEvents(java.awt.AWTEvent.MOUSE_EVENT_MASK | java.awt.AWTEvent.MOUSE_MOTION_EVENT_MASK);
-            }
-
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2d = (Graphics2D) g.create();
-                try {
-                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.80f));
-                    g2d.setColor(new Color(20, 20, 20));
-                    g2d.fillRect(0, 0, getWidth(), getHeight());
-                } finally {
-                    g2d.dispose();
-                }
-            }
-
-            @Override
-            protected void processMouseEvent(java.awt.event.MouseEvent e) {
-                super.processMouseEvent(e);
-                e.consume();
-            }
-
-            @Override
-            protected void processMouseMotionEvent(java.awt.event.MouseEvent e) {
-                super.processMouseMotionEvent(e);
-                e.consume();
-            }
-        };
-
-        helpOverlay.setOpaque(false);
-        helpOverlay.setLayout(new GridBagLayout());
-
-        HelpOverlay content = new HelpOverlay(KeyMap.preferred(), inputHandler.boundActions());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.anchor = GridBagConstraints.CENTER;
-        helpOverlay.add(content, gbc);
-
-        helpOverlay.setBounds(0, 0, layeredPane.getWidth(), layeredPane.getHeight());
-        layeredPane.add(helpOverlay, JLayeredPane.MODAL_LAYER);
-
-        validate();
-        repaint();
-    }
-
-    private void closeHelpOverlay() {
-        if (helpOverlay != null) {
-            layeredPane.remove(helpOverlay);
-            helpOverlay = null;
-            validate();
-            repaint();
+        syncMoodSkyWidth();
+        mood.refresh(KeyMap.preferred(), inputHandler.boundActions());
+        if (logProvider instanceof Mood) {
+            centerOnMoodLoginInstruction();
+            updateVisibleLines();
             viewPanel.requestFocusInWindow();
+            return;
         }
+        closeTimePanel();
+        closeDetails();
+        if (statusBar.isSearchInputActive()) {
+            setSearchInputActive(false);
+        }
+        helpOriginState = cursorManager.captureViewState();
+        helpOpen = true;
+        statusBar.setHelpMode(true);
+        cursorManager.swapProvider(mood, null);
+        centerOnMoodLoginInstruction();
+        updateVisibleLines();
+        viewPanel.requestFocusInWindow();
     }
 
     /**
@@ -3570,7 +3624,7 @@ public class LogViewer extends JPanel
                 try {
                     g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.80f));
-                    g2d.setColor(new Color(20, 20, 20));
+                    g2d.setColor(DarculaColors.VEIL);
                     g2d.fillRect(0, 0, getWidth(), getHeight());
                 } finally {
                     g2d.dispose();
@@ -3604,8 +3658,10 @@ public class LogViewer extends JPanel
             closePreferencesOverlay();
             if (saved) {
                 // Notify user and update display settings
+                mood.refresh(KeyMap.preferred(), inputHandler.boundActions());
                 notice(StatusBar.Severity.INFO, "Preferences saved.");
                 applyMatchesPreference();
+                updateVisibleLines();
                 updateMinimap();
                 statusBar.updateState();
             }
@@ -3710,7 +3766,7 @@ public class LogViewer extends JPanel
             int y = 0;
 
             renderer.setCharSize(charSize);
-            renderer.setViewKind(switch (viewMode) {
+            renderer.setViewKind(helpOpen ? LineRenderer.ViewKind.LOG : switch (viewMode) {
                 case LOG -> LineRenderer.ViewKind.LOG;
                 case MATCHES -> LineRenderer.ViewKind.MATCHES;
                 case BOOKMARKS -> LineRenderer.ViewKind.BOOKMARKS;
@@ -3840,7 +3896,7 @@ public class LogViewer extends JPanel
 
     /** Logged in and browsing, with no login or index overlay over the log. */
     boolean canOpenTimePanel() {
-        return !isInMoodMode() && loginOverlay == null && indexPanel == null;
+        return !(logProvider instanceof Mood) && loginOverlay == null && indexPanel == null;
     }
 
     /** A click on the time group: opens the panel, or closes it when it is open. */

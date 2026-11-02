@@ -36,11 +36,6 @@ public class MonthBox extends JComponent {
     private static final int ARC = 8;
     private static final int ARROW_W = 4;
     private static final int ARROW_H = 7;
-    private static final Color RANGE_FILL = new Color(DarculaColors.BLUE.getRed(), DarculaColors.BLUE.getGreen(),
-            DarculaColors.BLUE.getBlue(), 130);
-    private static final Color PREVIEW_FILL = new Color(DarculaColors.BLUE.getRed(), DarculaColors.BLUE.getGreen(),
-            DarculaColors.BLUE.getBlue(), 70);
-    private static final Color HOVER_FILL = new Color(255, 255, 255, 22);
 
     private enum Hover {
         PREVIOUS, NEXT, DAY
@@ -300,11 +295,11 @@ public class MonthBox extends JComponent {
         Rectangle prev = previousArrow();
         Rectangle next = nextArrow();
         if (hover == Hover.PREVIOUS) {
-            g2.setColor(HOVER_FILL);
+            g2.setColor(DarculaColors.HOVER_FILL);
             g2.fill(roundCell(prev));
         }
         if (hover == Hover.NEXT) {
-            g2.setColor(HOVER_FILL);
+            g2.setColor(DarculaColors.HOVER_FILL);
             g2.fill(roundCell(next));
         }
         g2.setColor(hover == Hover.PREVIOUS ? DarculaColors.G9 : DarculaColors.G6);
@@ -358,7 +353,7 @@ public class MonthBox extends JComponent {
         if (!hasPreview && !hasRange) {
             return;
         }
-        g2.setColor(hasPreview ? PREVIEW_FILL : RANGE_FILL);
+        g2.setColor(hasPreview ? DarculaColors.PREVIEW_FILL : DarculaColors.RANGE_FILL);
         LocalDate first = firstCell();
         for (int row = 0; row < 6; row++) {
             int c0 = -1;
@@ -403,7 +398,7 @@ public class MonthBox extends JComponent {
             LocalDate d = first.plusDays(i);
             Rectangle r = cell(i);
             if (hover == Hover.DAY && d.equals(hoverDay)) {
-                g2.setColor(HOVER_FILL);
+                g2.setColor(DarculaColors.HOVER_FILL);
                 g2.fill(roundCell(r));
             }
             if (d.equals(focusDay)) {

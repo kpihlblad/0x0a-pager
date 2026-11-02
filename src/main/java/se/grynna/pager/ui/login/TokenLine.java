@@ -732,8 +732,13 @@ public final class TokenLine extends JPanel {
 
     private void closeCompletionPopup() {
         popupOpen = false;
-        if (popupMenu != null && popupMenu.isVisible()) {
-            popupMenu.setVisible(false);
+        if (popupMenu != null) {
+            if (popupMenu.isVisible()) {
+                popupMenu.setVisible(false);
+            }
+            popupMenu = null;
+            popupList = null;
+            popupModel = null;
         }
     }
 

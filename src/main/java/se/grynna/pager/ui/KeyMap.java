@@ -316,6 +316,10 @@ public final class KeyMap {
 
         builder.add(UiAction.SET_MARK,
                 key(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK, KeyGuard.GUARDED, Context.ANY).tagged(EMACS));
+        // Double-tap Tab selects the region under the cursor, as a double-click does; the first tap does nothing.
+        builder.add(UiAction.SELECT_REGION, key(KeyEvent.VK_TAB, 0, KeyGuard.GUARDED, Context.LOG_VIEW));
+        builder.add(UiAction.SELECT_REGION, key(KeyEvent.VK_TAB, 0, KeyGuard.GUARDED, Context.MATCHES_VIEW));
+        builder.add(UiAction.SELECT_REGION, key(KeyEvent.VK_TAB, 0, KeyGuard.GUARDED, Context.BOOKMARKS_VIEW));
         builder.add(UiAction.COPY, key(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK, KeyGuard.GUARDED, Context.ANY));
         // Copy as…: opens the format menu. Bound per view, not for the prompt, whose text field has its own keys.
         builder.add(UiAction.COPY_AS, key(KeyEvent.VK_C, ctrlShift, KeyGuard.GUARDED, Context.LOG_VIEW));

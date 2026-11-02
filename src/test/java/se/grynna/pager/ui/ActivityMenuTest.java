@@ -68,7 +68,7 @@ class ActivityMenuTest {
         assertThat(buttons(menu)).allSatisfy(button -> {
             ActionPill pill = (ActionPill) button;
             assertThat(pill.accent()).isEqualTo(pill.getForeground());
-            assertThat(pill.getFont()).isEqualTo(Fontalizer.getFont());
+            assertThat(pill.getFont()).isEqualTo(Fontalizer.getSmallUiFont());
             assertThat(pill.isContentAreaFilled()).isFalse();
             assertThat(pill.isBorderPainted()).isFalse();
             assertThat(pill.getMargin()).isEqualTo(new Insets(0, 4, 0, 4));

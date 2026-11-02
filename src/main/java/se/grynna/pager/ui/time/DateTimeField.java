@@ -77,7 +77,6 @@ public class DateTimeField extends JComponent {
     private static final int SEG_ARC = 5;
     private static final int REPEAT_DELAY_MS = 400;
     private static final int REPEAT_INTERVAL_MS = 55;
-    private static final Color BOX_FILL = DarculaColors.BACKGROUND.darker();
 
     private final Font font;
     private final ZoneId zone;
@@ -716,7 +715,7 @@ public class DateTimeField extends JComponent {
             int boxY = boxY();
             int boxH = boxHeight();
 
-            g2.setColor(BOX_FILL);
+            g2.setColor(DarculaColors.FIELD_FILL);
             g2.fill(new RoundRectangle2D.Float(0, boxY, w, boxH, BOX_ARC, BOX_ARC));
             g2.setColor(outlineColor(focused));
             g2.draw(new RoundRectangle2D.Float(0.5f, boxY + 0.5f, w - 1f, boxH - 1f, BOX_ARC, BOX_ARC));

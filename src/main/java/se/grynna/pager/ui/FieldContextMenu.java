@@ -46,10 +46,10 @@ final class FieldContextMenu {
         String term = DetailsFields.shortTermText(field);
         JPopupMenu menu = new JPopupMenu();
 
-        menu.add(item(RowContextMenu.hinted("Narrow to " + term, keys.label(UiAction.DETAILS_NARROW_FIELD)),
-                field.filterable(), actions::narrow));
-        menu.add(item(RowContextMenu.hinted("Exclude " + term, keys.label(UiAction.DETAILS_EXCLUDE_FIELD)),
-                field.filterable(), actions::exclude));
+        menu.add(ActivityRows.termRow(term,
+                RowContextMenu.hinted("Narrow to " + term, keys.label(UiAction.DETAILS_NARROW_FIELD)),
+                RowContextMenu.hinted("Exclude " + term, keys.label(UiAction.DETAILS_EXCLUDE_FIELD)),
+                actions::narrow, actions::exclude, field.filterable()));
         menu.addSeparator();
 
         menu.add(item(RowContextMenu.hinted(field.inMessage() ? "Remove from message" : "Add to message",

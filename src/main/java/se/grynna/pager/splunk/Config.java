@@ -2,6 +2,8 @@ package se.grynna.pager.splunk;
 
 import java.time.ZoneId;
 import java.util.Locale;
+import se.grynna.pager.utils.Theme;
+
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
@@ -91,6 +93,15 @@ public class Config {
 
     public void setKeyHints(String keyHints) {
         prefs.put("keyHints", keyHints);
+    }
+
+    /** The colour scheme chosen in the main menu; {@link Theme#DARK} until the user picks the light one. */
+    public Theme getTheme() {
+        return Theme.fromName(prefs.get("theme", Theme.DARK.name()));
+    }
+
+    public void setTheme(Theme theme) {
+        prefs.put("theme", theme.name());
     }
 
     public void flush() throws BackingStoreException {

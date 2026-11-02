@@ -34,6 +34,8 @@ public enum UiAction {
     SELECT_PAGE_UP("Extend selection one page up", Group.SELECTION_COPY), SELECT_PAGE_DOWN(
             "Extend selection one page down", Group.SELECTION_COPY),
 
+    SELECT_REGION("Double-tap: select the region under the cursor, again to widen it", Group.SELECTION_COPY),
+
     SET_MARK("Set the selection mark", Group.SELECTION_COPY), COPY("Copy selection",
             Group.SELECTION_COPY), COPY_AS("Copy the selection in a chosen format", Group.SELECTION_COPY),
 

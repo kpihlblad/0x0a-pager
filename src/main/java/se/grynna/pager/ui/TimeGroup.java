@@ -155,6 +155,11 @@ public final class TimeGroup extends JComponent {
                 + (rangeTooltip == null ? "" : "\n" + rangeTooltip);
     }
 
+    @Override
+    public Point getToolTipLocation(MouseEvent event) {
+        return InWindowToolTip.locationFor(this, event);
+    }
+
     private int wordWidth(String word) {
         return getFontMetrics(wordFont).stringWidth(word + " ");
     }

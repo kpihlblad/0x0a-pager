@@ -2,6 +2,7 @@ package se.grynna.pager.ui;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
+import raven.toast.Notifications;
 import se.grynna.pager.exceptions.SearchException;
 import se.grynna.pager.exceptions.StorageException;
 import se.grynna.pager.exceptions.TemporarySearchException;
@@ -17,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 import static java.lang.Math.max;
@@ -55,8 +57,8 @@ public class CursorManager {
 
     // Nice Ratio for positioning target line in upper ;portion of screen
     private static final double NICE_PLACEMENT_RATIO = 0.46;
-    // Keep lines visible when scrolling near bounsdaries
-    private static final double NICE_SCROLL_RATIO = 0.33;
+    // Keep lines visible when scrolling near boundaries
+    private static final double NICE_SCROLL_RATIO = 0.45;
     // How far from each end of a selection the selection span looks for a row with a time
     private static final int SELECTION_SPAN_SCAN_ROWS = 64;
 
@@ -111,6 +113,8 @@ public class CursorManager {
     private final LogViewPort viewPort;
 
     private ClipboardAccess clipboard = ClipboardAccess.system();
+    private static final String COPIED_TO_CLIPBOARD = "Copied to clipboard";
+    private Consumer<String> copiedNotifier = CursorManager::showCopiedToast;
 
     private int pageStart = 0;
     private int leftOfPage = 0;
@@ -243,7 +247,7 @@ public class CursorManager {
             synchronized (cursorLock) {
                 if (deltaLines < 0 && LIMIT_TOP_LINE - deltaLines >= pageStart) return;
                 if (deltaLines > 0 && LIMIT_BOTTOM_LINE - deltaLines <= pageStart) return;
-                pageStart += snapToBoundary(deltaLines);;
+                pageStart += snapToBoundary(deltaLines);
             }
             log.trace("scroll toplineonpage {} to {}", deltaLines, pageStart);
         }
@@ -1018,6 +1022,7 @@ public class CursorManager {
             dl.setSelectionEnd(-1);
         }
         dl.setHighlights(highlights);
+        dl.setStyleSpans(logProvider.styleSpans(line));
         return dl;
     }
 
@@ -1041,14 +1046,15 @@ public class CursorManager {
                 dl.setSelectionEnd(Math.max(cursor.col(), mark.col()));
                 String selectedText = dl.selected();
                 if (selectedText != null && !selectedText.isBlank()) {
-                    highlights.add(new TextHighlight(selectedText, DarculaColors.COMMENT, null));
+                    highlights.add(new TextHighlight(selectedText, DarculaColors.SELECTION_ECHO, null));
                 }
             }
         }
 
         // Search term and narrowed scope terms — case-insensitive, because Splunk search is too.
         viewPort.getHighlightTerms().stream().filter(term -> !term.isBlank()).forEach(
-                term -> highlights.add(new TextHighlight(term, DarculaColors.YELLOW, DarculaColors.BACKGROUND, false)));
+                term -> highlights.add(new TextHighlight(term, DarculaColors.MATCH_HIGHLIGHT,
+                        DarculaColors.MATCH_HIGHLIGHT_TEXT, false)));
 
         return highlights;
     }
@@ -1120,16 +1126,27 @@ public class CursorManager {
             return;
         }
         clipboard.setContents(Copier.transferable(selection));
+        copiedNotifier.accept(rowsMessage(selection.size()));
     }
 
     /** Copy {@code lines} (one per row) to the clipboard, as Copy does for a selection. */
     void copyText(List<String> lines) {
         clipboard.setContents(Copier.transferable(lines));
+        copiedNotifier.accept(rowsMessage(lines.size()));
     }
 
     /** Put prepared clipboard contents (a copy-as format) on the clipboard. */
     void copyContents(java.awt.datatransfer.Transferable contents) {
         clipboard.setContents(contents);
+        copiedNotifier.accept(COPIED_TO_CLIPBOARD);
+    }
+
+    private static String rowsMessage(int rows) {
+        return rows == 1 ? "Copied 1 row" : "Copied " + rows + " rows";
+    }
+
+    private static void showCopiedToast(String message) {
+        Notifications.getInstance().show(Notifications.Type.SUCCESS, Notifications.Location.TOP_CENTER, message);
     }
 
     /**
@@ -1150,6 +1167,11 @@ public class CursorManager {
     /** Where Copy puts the selection; the system clipboard unless a test replaces it. */
     void setClipboard(ClipboardAccess clipboard) {
         this.clipboard = clipboard;
+    }
+
+    /** Receives the confirmation text after a copy; the toast unless a test replaces it. */
+    void setCopiedNotifier(Consumer<String> notifier) {
+        this.copiedNotifier = notifier;
     }
 
     // Character class hierarchy for word selection and expansion.
@@ -1229,34 +1251,68 @@ public class CursorManager {
             int line = lineFromVisible(visibleLine);
             int col = colFromVisible(visibleCol);
 
-            String lineText = decorate(getLogProviderLine(line), line).formattedLine();
             if (clickCount == 2) {
                 // mousePressed (clickCount=1) already cleared mark/cursor via setCursorFromClick,
                 // but we saved the previous selection in prevMark/prevCursor.
-                if (wasInsidePreviousSelection(line, col)) {
-                    // Restore previous selection and expand outward (Ctrl-W style)
+                boolean widen = wasInsidePreviousSelection(line, col);
+                if (widen) {
                     mark = prevMark;
                     cursor = prevCursor;
-                    expandSelection(lineText);
-                } else {
-                    // Fresh word selection at click position
-                    Pair<Integer, Integer> bounds = findWordBounds(lineText, col);
-                    if (bounds != null) {
-                        mark = new Cursor(line, bounds.getLeft());
-                        cursor = new Cursor(line, bounds.getRight());
-                    }
                 }
+                selectRegion(line, col, widen);
             } else if (clickCount == 3) {
                 // Select whole line
-                cursor = new Cursor(line, lineText.length());
+                cursor = new Cursor(line, lineText(line).length());
                 mark = new Cursor(line, 0);
             }
-            prevMark = null;
-            prevCursor = null;
-            selectingInProgress = false;
-            setScrollLock(false);
+            endSelectionGesture();
         }
         viewPort.updateVisibleLines();
+    }
+
+    /**
+     * Selects the region under the cursor, as a double-click does at the pointer. A one-line selection
+     * on the cursor's line is widened one class level instead, so repeated calls grow the selection.
+     */
+    public void selectRegionAtCursor() throws TemporarySearchException, SearchException, StorageException {
+        synchronized (cursorLock) {
+            spawnCursorIfNotPresent();
+            int line = cursor.line;
+            selectRegion(line, cursor.col(), mark != null && mark.line == line);
+            endSelectionGesture();
+        }
+        viewPort.updateVisibleLines();
+    }
+
+    /**
+     * The shared step of a double-click and a double-tap: selects the run of same-class characters around
+     * {@code col}, or, with {@code widen}, grows the current selection one class level. Off the text the
+     * selection stays as it was.
+     */
+    private void selectRegion(int line, int col, boolean widen)
+            throws TemporarySearchException, SearchException, StorageException {
+        String lineText = lineText(line);
+        if (widen) {
+            expandSelection(lineText);
+            return;
+        }
+        Pair<Integer, Integer> bounds = findWordBounds(lineText, col);
+        if (bounds != null) {
+            mark = new Cursor(line, bounds.getLeft());
+            cursor = new Cursor(line, bounds.getRight());
+        }
+    }
+
+    private String lineText(int line) throws TemporarySearchException, SearchException, StorageException {
+        return decorate(getLogProviderLine(line), line).formattedLine();
+    }
+
+    /** Ends a multi-click or multi-tap selection: forgets the pre-click selection and enters cursor mode. */
+    private void endSelectionGesture() {
+        prevMark = null;
+        prevCursor = null;
+        selectingInProgress = false;
+        setScrollLock(false);
     }
 
     /**

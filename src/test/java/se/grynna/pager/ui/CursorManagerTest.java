@@ -7,6 +7,7 @@ import se.grynna.pager.exceptions.SearchException;
 import se.grynna.pager.exceptions.StorageException;
 import se.grynna.pager.exceptions.TemporarySearchException;
 import se.grynna.pager.splunk.*;
+import se.grynna.pager.ui.clip.InMemoryClipboard;
 import se.grynna.pager.ui.preferences.DateTimeFormatterManager;
 
 import java.time.Instant;
@@ -320,6 +321,20 @@ class CursorManagerTest {
     }
 
     @Test
+    void copyToClipboardReportsTheSelectedRowCount() throws Exception {
+        cursorManager.updateSize(10, 10);
+        cursorManager.setClipboard(new InMemoryClipboard());
+        var copied = new ArrayList<String>();
+        cursorManager.setCopiedNotifier(copied::add);
+
+        cursorManager.setCursorFromClick(1, 0, false);
+        cursorManager.setCursorFromClick(3, 2, true);
+        cursorManager.copyToClipboard();
+
+        assertThat(copied).containsExactly("Copied 3 rows");
+    }
+
+    @Test
     void setMarkAtCursor() {
         cursorManager.updateSize(10, 10);
         cursorManager.setMarkAtCursor();
@@ -615,6 +630,34 @@ class CursorManagerTest {
 
         simulateDoubleClick(0, offset + 3); // on '7'
         assertThat(selectedText()).isEqualTo("10.7.149.2");
+    }
+
+    @Test
+    void selectRegionAtCursorSelectsTheWordUnderTheCursor() throws Exception {
+        String msg = "event=\"34\" and time=17:30 user=kalle";
+        setLineMessage(msg);
+        cursorManager.updateSize(10, 80);
+        int offset = msgOffset(msg);
+
+        cursorManager.setCursorFromClick(0, offset + 7, false);
+        cursorManager.selectRegionAtCursor();
+
+        assertThat(selectedText()).isEqualTo("34");
+    }
+
+    @Test
+    void selectRegionAtCursorWidensTheSelectionOnEachCall() throws Exception {
+        String msg = "time=17:30 user=kalle";
+        setLineMessage(msg);
+        cursorManager.updateSize(10, 80);
+        int offset = msgOffset(msg);
+
+        cursorManager.setCursorFromClick(0, offset + 5, false);
+        cursorManager.selectRegionAtCursor();
+        assertThat(selectedText()).isEqualTo("17");
+
+        cursorManager.selectRegionAtCursor();
+        assertThat(selectedText()).isEqualTo("17:30");
     }
 
     @Test

@@ -62,6 +62,15 @@ public class Fontalizer {
         return ui != null ? ui : font;
     }
 
+    /**
+     * A compact proportional font for small controls inside menus (80 % of {@link #getUiFont()}, 12 pt at 96 dpi),
+     * so it scales with the UI font.
+     */
+    public static Font getSmallUiFont() {
+        Font ui = getUiFont();
+        return ui.deriveFont((float) Math.round(ui.getSize2D() * 0.8f));
+    }
+
     /** The semibold UI font for headings and field labels; the bold monospace font without FlatLaf. */
     public static Font getUiSemiboldFont() {
         Font ui = UIManager.getFont("semibold.font");
@@ -79,16 +88,20 @@ public class Fontalizer {
     static {
         try {
 
+            var ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
             var baseFont = Font.createFont(Font.TRUETYPE_FONT,
                     requireNonNull(Fontalizer.class.getResourceAsStream(FONT_PATH)));
+            ge.registerFont(baseFont);
             for (AttributedCharacterIterator.Attribute a : baseFont.getAvailableAttributes()) {
                 log.debug("Font attribute: {}", a);
             }
-            font = baseFont.deriveFont(13f);
 
             var baseBoldFont = Font.createFont(Font.TRUETYPE_FONT,
                     requireNonNull(Fontalizer.class.getResourceAsStream(FONT_BOlD_PATH)));
-            boldFont = baseBoldFont.deriveFont(13f);
+            ge.registerFont(baseBoldFont);
+
+            font = FontUtils.getCompositeFont(baseFont.getFamily(), Font.PLAIN, 13);
+            boldFont = FontUtils.getCompositeFont(baseBoldFont.getFamily(), Font.BOLD, 13);
 
         } catch (Exception e) {
             log.error("Error loading fonts ({}, {})", FONT_PATH, FONT_BOlD_PATH, e);
