@@ -1324,6 +1324,20 @@ class InputHandlerTest {
         verify(harness.viewPort(), never()).searchNext();
     }
 
+    @Test
+    void theScopeAndGotoButtonsWorkWhileAnEditableFieldHasFocus() throws Exception {
+        Harness harness = harness(true);
+
+        Action login = harness.panel().getActionMap().get(Actions.LOGIN);
+        login.actionPerformed(new ActionEvent(harness.panel(), ActionEvent.ACTION_PERFORMED, "button"));
+        Action go = harness.panel().getActionMap().get(Actions.GOTO);
+        go.actionPerformed(new ActionEvent(harness.panel(), ActionEvent.ACTION_PERFORMED, "button"));
+        flushEdt();
+
+        verify(harness.viewPort()).actionLogin();
+        verify(harness.viewPort()).openTimePanel(TimePanel.Focus.AT);
+    }
+
     // === Copy and the search prompt's selection ===
 
     private static final KeyStroke CTRL_C = KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK);

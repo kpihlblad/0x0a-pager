@@ -20,17 +20,18 @@ import java.awt.geom.RoundRectangle2D;
 
 /**
  * A compact outlined pill button used by the prompt row and the activity rows. It draws its own stadium capsule so
- * the text and border share the action's accent colour without a filled background at rest. Hover and press add a
- * tint; the focused look, set by a keyboard-driven menu, adds a stronger tint and a 2 px outline.
+ * the text and border share the action's accent colour. At rest the capsule has a faint tint of the accent; hover and
+ * press strengthen it, and the focused look, set by a keyboard-driven menu, adds a stronger tint and a 2 px outline.
  */
 final class ActionPill extends JButton {
 
     static final Insets DEFAULT_MARGIN = new Insets(0, 4, 0, 4);
     private static final int HORIZONTAL_PADDING = 4;
     private static final int VERTICAL_PADDING = 1;
-    private static final int HOVER_ALPHA = 36;
-    private static final int FOCUSED_ALPHA = 56;
-    private static final int PRESSED_ALPHA = 64;
+    private static final int REST_ALPHA = 20;
+    private static final int HOVER_ALPHA = 48;
+    private static final int FOCUSED_ALPHA = 68;
+    private static final int PRESSED_ALPHA = 84;
 
     private boolean focusedLook;
 
@@ -56,6 +57,7 @@ final class ActionPill extends JButton {
         putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
         putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0);
         putClientProperty(FlatClientProperties.MINIMUM_HEIGHT, 0);
+        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
     }
 
     /** The accent colour of the pill's text and rounded border: its foreground, so a theme switch recolours it. */
@@ -111,8 +113,11 @@ final class ActionPill extends JButton {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             ButtonModel model = getModel();
-            if (isEnabled() && (model.isRollover() || model.isPressed() || focusedLook)) {
-                int alpha = model.isPressed() ? PRESSED_ALPHA : focusedLook ? FOCUSED_ALPHA : HOVER_ALPHA;
+            if (isEnabled()) {
+                boolean interactive = model.isRollover() || model.isPressed() || focusedLook;
+                int alpha = !interactive
+                        ? REST_ALPHA
+                        : model.isPressed() ? PRESSED_ALPHA : focusedLook ? FOCUSED_ALPHA : HOVER_ALPHA;
                 Color accent = accent();
                 g2.setColor(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), alpha));
                 g2.fill(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, h - 1f, h - 1f));

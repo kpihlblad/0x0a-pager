@@ -242,6 +242,8 @@ class MenuManagerTest {
             openPopup();
             assertThat(menuItem("Copy as… (Ctrl-Shift-C)")).isNotNull();
             assertThat(menuItem("Export…")).isNotNull();
+            assertThat(menuItem("Preferences...")).isNotNull();
+            assertThat(Arrays.stream(menuItems()).map(JMenuItem::getText)).doesNotContain("Light mode");
         });
     }
 

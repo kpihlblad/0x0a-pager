@@ -336,8 +336,9 @@ public class LogViewer extends JPanel
         // Combined status bar and input bar
         statusBar = new StatusBar(font, this, () -> System.nanoTime() / 1_000_000, clock);
 
-        // Add the status bar to the bottom
+        // Place the status bar according to the ui-layout preference (SOUTH for most, NORTH for win)
         add(statusBar, BorderLayout.SOUTH);
+        applyUiLayout(config.getUiLayout());
         statusBar.setTimeGroupListener(
                 half -> toggleTimePanel(half == TimeGroup.Half.AT ? TimePanel.Focus.AT : TimePanel.Focus.FROM));
         cursorManager = new CursorManager(logProvider, this);
@@ -401,6 +402,7 @@ public class LogViewer extends JPanel
     @Override
     public void addNotify() {
         super.addNotify();
+        syncWindowDecorations();
         // Schedule base directory size update every 30 seconds while displayable
         if (diskUsageUpdate == null) {
             diskUsageUpdate = executor.scheduleAtFixedRate(new DiskUsageStatus(DatabaseManager::getBaseDirSizeFormatted,
@@ -732,7 +734,11 @@ public class LogViewer extends JPanel
     }
 
     @Override
-    public void actionLogin() { // Shows IndexPanel with login overlay on top - unified approach for all login scenarios
+    public void actionLogin() {
+        if (indexPanel != null && loginOverlay == null) {
+            indexPanel.cancel();
+            return;
+        }
         showIndexPanelWithLoginOverlay();
     }
 
@@ -949,6 +955,7 @@ public class LogViewer extends JPanel
         closeKeyboardHelp();
         closeDetails();
         closeTimePanel();
+        setSearchInputActive(false);
         statusBar.setModalIndex(true);
 
         // Remove existing indexPanel if present
@@ -1335,11 +1342,12 @@ public class LogViewer extends JPanel
             viewPanel.setEnabled(true);
         }
 
+        statusBar.setModalIndex(false);
         validate();
         repaint();
-        viewPanel.requestFocusInWindow();
-
-        invokeLater(() -> statusBar.setModalIndex(false));
+        if (viewPanel != null) {
+            viewPanel.requestFocusInWindow();
+        }
     }
 
     @Override
@@ -3499,8 +3507,15 @@ public class LogViewer extends JPanel
 
     /** Switches between the dark and the light theme while the application runs, and remembers the choice. */
     public void toggleLightMode() {
-        Theme next = isLightMode() ? Theme.DARK : Theme.LIGHT;
-        ThemeSwitch.apply(next);
+        applyTheme(isLightMode() ? Theme.DARK : Theme.LIGHT);
+    }
+
+    /** Applies {@code theme} while the application runs and persists the choice. */
+    public void applyTheme(Theme theme) {
+        Theme next = theme != null ? theme : Theme.DARK;
+        if (DarculaColors.theme() != next) {
+            ThemeSwitch.apply(next);
+        }
         config.setTheme(next);
     }
 
@@ -3658,6 +3673,8 @@ public class LogViewer extends JPanel
             closePreferencesOverlay();
             if (saved) {
                 // Notify user and update display settings
+                applyTheme(config.getTheme());
+                applyUiLayout(config.getUiLayout());
                 mood.refresh(KeyMap.preferred(), inputHandler.boundActions());
                 notice(StatusBar.Severity.INFO, "Preferences saved.");
                 applyMatchesPreference();
@@ -3871,7 +3888,7 @@ public class LogViewer extends JPanel
             setSearchInputActive(false);
             timePanel = new TimePanel(font, DateTimeFormatterManager.zoneId(), clock,
                     ref -> new GotoHandler(config, at -> {}, () -> {}, ref)::parseTimestamp,
-                    timePanelListener(this));
+                    timePanelListener(this), statusBar.uiLayout() == UiLayout.WIN);
             // Swallow clicks on the panel's empty areas, so they do not reach the log underneath.
             timePanel.addMouseListener(new java.awt.event.MouseAdapter() {});
             timePanel.addMouseWheelListener(e -> {});
@@ -3924,15 +3941,99 @@ public class LogViewer extends JPanel
         return true;
     }
 
-    /** Full width, docked to the bottom of the layered pane (the top edge of the status bar). */
+    /** Full width, docked to the status bar edge of the layered pane (bottom for MOST, top for WIN). */
     private void layoutTimePanel() {
         if (timePanel == null) {
             return;
         }
+        boolean dockedAtTop = statusBar.uiLayout() == UiLayout.WIN;
+        timePanel.setDockedAtTop(dockedAtTop);
         int width = layeredPane.getWidth();
         int height = Math.min(timePanel.preferredHeight(width), layeredPane.getHeight());
-        timePanel.setBounds(0, layeredPane.getHeight() - height, width, height);
+        int y = dockedAtTop ? 0 : layeredPane.getHeight() - height;
+        timePanel.setBounds(0, y, width, height);
         timePanel.validate();
+    }
+
+    /**
+     * Switches between {@link UiLayout#MOST} (status and prompt bars at the bottom) and {@link UiLayout#WIN}
+     * (status row merged into the window title bar at the top, with the prompt/action bar directly below it).
+     */
+    public void applyUiLayout(UiLayout layout) {
+        UiLayout next = layout != null ? layout : UiLayout.MOST;
+        statusBar.setUiLayout(next);
+        String constraint = next == UiLayout.WIN ? BorderLayout.NORTH : BorderLayout.SOUTH;
+        if (((BorderLayout) getLayout()).getLayoutComponent(constraint) != statusBar) {
+            remove(statusBar);
+            add(statusBar, constraint);
+        }
+        syncWindowDecorations();
+        layoutTimePanel();
+        revalidate();
+        repaint();
+    }
+
+    public UiLayout uiLayout() {
+        return statusBar.uiLayout();
+    }
+
+    private void syncWindowDecorations() {
+        JRootPane rootPane = getRootPane();
+        if (rootPane == null) {
+            return;
+        }
+        boolean win = statusBar.uiLayout() == UiLayout.WIN;
+        if (win) {
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.USE_WINDOW_DECORATIONS, Boolean.TRUE);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.FULL_WINDOW_CONTENT, Boolean.TRUE);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_SHOW_ICON, Boolean.FALSE);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_SHOW_TITLE, Boolean.FALSE);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_HEIGHT,
+                    statusBar.titleBarHeight());
+            statusBar.applyRootPaneTitleBarColor(statusBar.statusRowBackground());
+            ensureCustomWindowDecoration(rootPane, true);
+        } else {
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.FULL_WINDOW_CONTENT, Boolean.FALSE);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_SHOW_ICON, null);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_SHOW_TITLE, null);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_HEIGHT, null);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_BACKGROUND, null);
+            rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_FOREGROUND, null);
+            ensureCustomWindowDecoration(rootPane, false);
+        }
+    }
+
+    private static void ensureCustomWindowDecoration(JRootPane rootPane, boolean win) {
+        if (com.formdev.flatlaf.ui.FlatNativeWindowBorder.isSupported()) {
+            return;
+        }
+        Window window = SwingUtilities.getWindowAncestor(rootPane);
+        if (!(window instanceof JFrame frame)) {
+            return;
+        }
+        if (win && frame.isUndecorated() && rootPane.getWindowDecorationStyle() == JRootPane.FRAME) {
+            return;
+        }
+        if (!win && !frame.isUndecorated() && rootPane.getWindowDecorationStyle() == JRootPane.NONE) {
+            return;
+        }
+        boolean wasDisplayable = frame.isDisplayable();
+        boolean wasVisible = frame.isVisible();
+        Rectangle bounds = frame.getBounds();
+        int extendedState = frame.getExtendedState();
+        if (wasDisplayable) {
+            frame.dispose();
+        }
+        JFrame.setDefaultLookAndFeelDecorated(win);
+        frame.setUndecorated(win);
+        rootPane.setWindowDecorationStyle(win ? JRootPane.FRAME : JRootPane.NONE);
+        if (wasDisplayable) {
+            frame.setBounds(bounds);
+            frame.setExtendedState(extendedState);
+            if (wasVisible) {
+                frame.setVisible(true);
+            }
+        }
     }
 
     /** What the time panel's keys do: each closes the panel first, so the log has the focus again. */

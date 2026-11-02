@@ -12,7 +12,8 @@ class DarculaColorsTest {
 
     @Test
     void theActionAccentsReachAaContrastOnTheOutsideAndTheMidnightBlueBackgrounds() {
-        assertThat(contrast(DarculaColors.EXCLUDE_ACCENT, DarculaColors.BACKGROUND_OUTSIDE)).isGreaterThanOrEqualTo(4.5);
+        assertThat(contrast(DarculaColors.EXCLUDE_ACCENT, DarculaColors.BACKGROUND_OUTSIDE))
+                .isGreaterThanOrEqualTo(4.5);
         for (Color accent : new Color[]{DarculaColors.NARROW_ACCENT, DarculaColors.SEARCH_ACCENT}) {
             assertThat(contrast(accent, DarculaColors.BACKGROUND_OUTSIDE)).isGreaterThanOrEqualTo(4.5);
             assertThat(contrast(accent, DarculaColors.MIDNIGHT_BLUE)).isGreaterThanOrEqualTo(4.5);

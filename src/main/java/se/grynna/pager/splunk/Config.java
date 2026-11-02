@@ -1,9 +1,10 @@
 package se.grynna.pager.splunk;
 
-import java.time.ZoneId;
-import java.util.Locale;
+import se.grynna.pager.ui.UiLayout;
 import se.grynna.pager.utils.Theme;
 
+import java.time.ZoneId;
+import java.util.Locale;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 
@@ -102,6 +103,18 @@ public class Config {
 
     public void setTheme(Theme theme) {
         prefs.put("theme", theme.name());
+    }
+
+    /**
+     * Where the status and prompt/action bars sit: {@link UiLayout#MOST} (stacked at the bottom) by default, or
+     * {@link UiLayout#WIN} (merged into the window title bar at the top).
+     */
+    public UiLayout getUiLayout() {
+        return UiLayout.fromName(prefs.get("uiLayout", UiLayout.MOST.name()));
+    }
+
+    public void setUiLayout(UiLayout uiLayout) {
+        prefs.put("uiLayout", (uiLayout != null ? uiLayout : UiLayout.MOST).name());
     }
 
     public void flush() throws BackingStoreException {

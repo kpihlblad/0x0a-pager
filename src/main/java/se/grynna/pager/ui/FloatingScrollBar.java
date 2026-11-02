@@ -12,7 +12,6 @@ import java.awt.event.MouseMotionAdapter;
 @Slf4j
 public class FloatingScrollBar {
 
-
     // private final LogViewPort viewPort;
     private final CursorManager cursorManager;
 

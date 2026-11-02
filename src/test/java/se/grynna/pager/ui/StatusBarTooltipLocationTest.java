@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -41,11 +42,12 @@ class StatusBarTooltipLocationTest {
 
     private JPanel window;
     private StatusBar statusBar;
+    private LogViewer viewer;
 
     @BeforeEach
     void setUp() throws Exception {
         DateTimeFormatterManagerTestUtil.initDTM();
-        LogViewer viewer = mock(LogViewer.class);
+        viewer = mock(LogViewer.class);
         when(viewer.getActionMap()).thenReturn(new ActionMap());
         when(viewer.getState()).thenReturn(InputState.SCROLL);
         when(viewer.isCursorMode()).thenReturn(false);
@@ -129,6 +131,28 @@ class StatusBarTooltipLocationTest {
                     .toList()) {
                 assertTooltipStaysInWindowAbove(chipPart, Math.max(1, chipPart.getWidth() / 2));
             }
+        });
+    }
+
+    @Test
+    void actionButtonsShareOneSizeAndTheirTooltipsFollowTheKeyMap() throws Exception {
+        onEdt(() -> {
+            JButton scope = (JButton) byTooltip("Scope: index and filters (L)");
+            JButton go = (JButton) byTooltip("Go to a time (G)");
+            JButton search = (JButton) byTooltip("Search (Ctrl-F)");
+            JButton menu = (JButton) byTooltip("Menu");
+            List<JButton> actions = List.of(scope, go, search, menu);
+
+            assertThat(actions.stream().map(Component::getPreferredSize).distinct().toList()).hasSize(1);
+            for (JButton action : actions) {
+                assertTooltipStaysInWindowAbove(action, Math.max(1, action.getWidth() / 2));
+            }
+
+            scope.doClick();
+            verify(viewer).actionLogin();
+
+            KeyMap.setPreferredFlavour(KeyFlavour.PAGER);
+            assertThat(search.getToolTipText()).isEqualTo("Search (/)");
         });
     }
 

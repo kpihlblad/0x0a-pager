@@ -296,6 +296,45 @@ class LogViewerScopeTest {
         });
     }
 
+    @Test
+    void pressingTheScopeButtonWhenOpenClosesItAndReturnsToLogOrMatches() throws Exception {
+        when(searchManager.loadIndexes()).thenReturn(new java.util.TreeSet<>(List.of("web")));
+        JButton[] scopeButton = new JButton[1];
+        onEdt(() -> {
+            scopeButton[0] = find(statusBar, JButton.class).stream()
+                    .filter(b -> "Scope: index and filters (L)".equals(b.getToolTipText()))
+                    .findFirst().orElseThrow();
+            scopeButton[0].doClick();
+        });
+        onEdt(() -> {
+            assertThat(statusBar.isModalIndex()).isTrue();
+            assertThat(statusBar.inputState()).isEqualTo(InputState.MODAL_INDEX);
+            assertThat(find(viewer, se.grynna.pager.ui.login.IndexPanel.class)).hasSize(1);
+            scopeButton[0].doClick();
+        });
+        onEdt(() -> {
+            assertThat(statusBar.isModalIndex()).isFalse();
+            assertThat(statusBar.inputState()).isEqualTo(InputState.SCROLL);
+            assertThat(find(viewer, se.grynna.pager.ui.login.IndexPanel.class)).isEmpty();
+
+            viewer.toggleMatches();
+            viewer.setSearchInputActive(false);
+            assertThat(viewer.isMatchesView()).isTrue();
+            assertThat(statusBar.inputState()).isEqualTo(InputState.MATCHES);
+            scopeButton[0].doClick();
+        });
+        onEdt(() -> {
+            assertThat(statusBar.inputState()).isEqualTo(InputState.MODAL_INDEX);
+            scopeButton[0].doClick();
+        });
+        onEdt(() -> {
+            assertThat(statusBar.isModalIndex()).isFalse();
+            assertThat(viewer.isMatchesView()).isTrue();
+            assertThat(statusBar.inputState()).isEqualTo(InputState.MATCHES);
+            assertThat(find(viewer, se.grynna.pager.ui.login.IndexPanel.class)).isEmpty();
+        });
+    }
+
     private void clearInvocations() {
         org.mockito.Mockito.clearInvocations(searchManager, provider);
     }

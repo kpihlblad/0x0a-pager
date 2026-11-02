@@ -5,9 +5,10 @@ import com.formdev.flatlaf.extras.FlatSVGIcon;
 import lombok.extern.slf4j.Slf4j;
 import raven.toast.Notifications;
 import raven.toast.ToastClientProperties;
-import se.grynna.pager.ui.AppClose;
 import se.grynna.pager.splunk.Config;
+import se.grynna.pager.ui.AppClose;
 import se.grynna.pager.ui.LogViewer;
+import se.grynna.pager.ui.UiLayout;
 import se.grynna.pager.utils.DarculaColors;
 import se.grynna.pager.utils.Theme;
 
@@ -35,10 +36,12 @@ public class Main {
         FlatDarculaLaf.setup(); // Apply Darcula theme
 
         SwingUtilities.invokeLater(() -> {
-            Theme theme = new Config().getTheme();
+            Config config = new Config();
+            Theme theme = config.getTheme();
             DarculaColors.use(theme);
             PagerLaf.setup(theme);
 
+            JFrame.setDefaultLookAndFeelDecorated(config.getUiLayout() == UiLayout.WIN);
             JFrame frame = new JFrame("0x0A Pager");
 
             List<Image> icons = windowIcons();

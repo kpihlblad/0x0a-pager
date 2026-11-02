@@ -85,6 +85,7 @@ public class TimePanel extends JPanel {
 
     private DateTimeField current;
     private String invalidReason;
+    private boolean dockedAtTop;
 
     private Timer slide;
     private long slideStart;
@@ -100,6 +101,13 @@ public class TimePanel extends JPanel {
      */
     public TimePanel(Font font, ZoneId zone, Clock clock,
             Function<Supplier<Instant>, Function<String, Optional<Instant>>> parserFactory, Listener listener) {
+        this(font, zone, clock, parserFactory, listener, false);
+    }
+
+    /** As above, docked to the top of the log ({@code dockedAtTop}) or to its bottom. */
+    public TimePanel(Font font, ZoneId zone, Clock clock,
+            Function<Supplier<Instant>, Function<String, Optional<Instant>>> parserFactory, Listener listener,
+            boolean dockedAtTop) {
         super(new BorderLayout());
         this.font = font;
         this.smallFont = font.deriveFont(SMALL_SIZE);
@@ -108,8 +116,11 @@ public class TimePanel extends JPanel {
         this.zone = zone;
         this.clock = clock;
         this.listener = listener;
+        this.dockedAtTop = dockedAtTop;
         setOpaque(false);
-        setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G4));
+        setBorder(dockedAtTop
+                ? BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G4)
+                : BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G4));
 
         atField = field(parserFactory);
         fromField = field(parserFactory);
@@ -236,6 +247,19 @@ public class TimePanel extends JPanel {
         setCurrent(focus == Focus.FROM ? fromField : atField);
         current.requestFocusInWindow();
         startSlide();
+    }
+
+    /** Docks the panel to the top ({@code true}) or bottom ({@code false}) of the log. */
+    public void setDockedAtTop(boolean dockedAtTop) {
+        if (this.dockedAtTop == dockedAtTop) {
+            return;
+        }
+        this.dockedAtTop = dockedAtTop;
+        setBorder(dockedAtTop
+                ? BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G4)
+                : BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G4));
+        revalidate();
+        repaint();
     }
 
     /** The height the panel wants at {@code width}; the presets wrap. */
@@ -411,7 +435,8 @@ public class TimePanel extends JPanel {
         }
         Graphics2D g2 = (Graphics2D) g.create();
         try {
-            g2.translate(0, (int) Math.round(getHeight() * (1 - reveal)));
+            int offset = (int) Math.round(getHeight() * (1 - reveal));
+            g2.translate(0, dockedAtTop ? -offset : offset);
             super.paint(g2);
         } finally {
             g2.dispose();

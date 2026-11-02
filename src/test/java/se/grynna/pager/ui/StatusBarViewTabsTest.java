@@ -41,7 +41,10 @@ class StatusBarViewTabsTest {
     void theLogTabIsActiveByDefaultAndTheTabsSitAtTheLeftOfTheStatusRow() throws Exception {
         onEdt(() -> {
             assertThat(tabs.active()).isEqualTo(Tab.LOG);
-            assertThat(tabs.getParent().getComponent(0)).isSameAs(tabs);
+            Component firstVisible = java.util.Arrays.stream(tabs.getParent().getComponents())
+                    .filter(Component::isVisible)
+                    .findFirst().orElseThrow();
+            assertThat(firstVisible).isSameAs(tabs);
         });
     }
 

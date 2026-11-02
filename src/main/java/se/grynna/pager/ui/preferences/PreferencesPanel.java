@@ -5,19 +5,25 @@ import se.grynna.pager.splunk.Config;
 import se.grynna.pager.ui.Fontalizer;
 import se.grynna.pager.ui.KeyFlavour;
 import se.grynna.pager.ui.KeyMap;
+import se.grynna.pager.ui.UiLayout;
 import se.grynna.pager.ui.autocomplete.AutoCompletion2;
 import se.grynna.pager.ui.login.FormGrid;
 import se.grynna.pager.ui.login.KeyButton;
 import se.grynna.pager.ui.login.Section;
 import se.grynna.pager.utils.DarculaColors;
+import se.grynna.pager.utils.Theme;
 
 import javax.swing.*;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.geom.RoundRectangle2D;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -61,8 +67,10 @@ public class PreferencesPanel extends JPanel {
     // UI Components - using String-based combos for AutoCompletion2 compatibility
     private JComboBox<String> zoneComboBox;
     private JComboBox<String> localeComboBox;
-    private JComboBox<String> matchesComboBox;
-    private JComboBox<String> minimapComboBox;
+    private ChoiceToggle<Theme> themeToggle;
+    private ChoiceToggle<UiLayout> layoutToggle;
+    private ChoiceToggle<Boolean> matchesToggle;
+    private ChoiceToggle<Boolean> minimapToggle;
     private JComboBox<String> keyHintsComboBox;
     private JLabel previewLabel;
 
@@ -104,16 +112,19 @@ public class PreferencesPanel extends JPanel {
 
             zoneComboBox = createZoneComboBox();
             localeComboBox = createLocaleComboBox();
-            matchesComboBox = new JComboBox<>(new String[]{"whole events", "first line only (⏎+N)"});
-            matchesComboBox.setSelectedIndex(config.getMatchesFirstLineOnly() ? 1 : 0);
-            minimapComboBox = new JComboBox<>(new String[]{"show match minimap", "hide"});
-            minimapComboBox.setSelectedIndex(config.getShowMinimap() ? 0 : 1);
+            themeToggle = new ChoiceToggle<>(retroFont, Theme.DARK, "dark", Theme.LIGHT, "light",
+                    config.getTheme());
+            layoutToggle = new ChoiceToggle<>(retroFont, UiLayout.MOST, UiLayout.MOST.displayName(), UiLayout.WIN,
+                    UiLayout.WIN.displayName(), config.getUiLayout());
+            matchesToggle = new ChoiceToggle<>(retroFont, Boolean.FALSE, "whole events", Boolean.TRUE,
+                    "first line only (⏎+N)", config.getMatchesFirstLineOnly());
+            minimapToggle = new ChoiceToggle<>(retroFont, Boolean.TRUE, "show", Boolean.FALSE, "hide",
+                    config.getShowMinimap());
             // Which key tradition menus and hints show first (all keys always work)
             keyHintsComboBox = new JComboBox<>(
                     Arrays.stream(KeyFlavour.values()).map(KeyFlavour::displayName).toArray(String[]::new));
             keyHintsComboBox.setSelectedIndex(KeyFlavour.fromName(config.getKeyHints()).ordinal());
-            for (JComboBox<String> combo : List.of(zoneComboBox, localeComboBox, matchesComboBox, minimapComboBox,
-                    keyHintsComboBox)) {
+            for (JComboBox<String> combo : List.of(zoneComboBox, localeComboBox, keyHintsComboBox)) {
                 combo.setFont(retroFont);
                 combo.setPrototypeDisplayValue(COMBO_PROTOTYPE);
             }
@@ -130,8 +141,8 @@ public class PreferencesPanel extends JPanel {
             content.add(new Section(DATE_TIME_SECTION, retroFont, FormGrid.of(LABEL_WIDTH,
                     new String[]{"timezone", "locale", "preview"}, zoneComboBox, localeComboBox, previewLabel)));
             content.add(new Section(VIEW_SECTION, retroFont, FormGrid.of(LABEL_WIDTH,
-                    new String[]{"matches", "minimap", "key hints"}, matchesComboBox, minimapComboBox,
-                    keyHintsComboBox)));
+                    new String[]{"theme", "ui-layout", "matches", "minimap", "key hints"}, themeToggle, layoutToggle,
+                    matchesToggle, minimapToggle, keyHintsComboBox)));
 
             add(createHeader(), BorderLayout.NORTH);
             add(content, BorderLayout.CENTER);
@@ -384,8 +395,10 @@ public class PreferencesPanel extends JPanel {
 
             config.setZoneId(zoneId);
             config.setLocale(locale);
-            config.setMatchesFirstLineOnly(matchesComboBox.getSelectedIndex() == 1);
-            config.setShowMinimap(minimapComboBox.getSelectedIndex() != 1);
+            config.setTheme(themeToggle.selected());
+            config.setUiLayout(layoutToggle.selected());
+            config.setMatchesFirstLineOnly(matchesToggle.selected());
+            config.setShowMinimap(minimapToggle.selected());
             KeyFlavour keyHints = KeyFlavour.values()[Math.max(0, keyHintsComboBox.getSelectedIndex())];
             config.setKeyHints(keyHints.name());
             KeyMap.setPreferredFlavour(keyHints);
@@ -401,6 +414,165 @@ public class PreferencesPanel extends JPanel {
             }
 
             onClose.accept(true);
+        }
+    }
+
+    /**
+     * A two-option horizontal segmented toggle for preferences that have only two choices (theme, ui-layout, matches,
+     * minimap). Both options sit side by side in a shared rounded box; the selected segment is filled in {@code BLUE}
+     * with bold text.
+     */
+    static final class ChoiceToggle<T> extends JPanel {
+
+        private static final int BOX_ARC = 8;
+        private static final int PAD_X = 12;
+        private static final int PAD_Y = 4;
+
+        private final T firstValue;
+        private final T secondValue;
+        private final SegmentButton firstButton;
+        private final SegmentButton secondButton;
+
+        ChoiceToggle(Font font, T firstValue, String firstLabel, T secondValue, String secondLabel, T selected) {
+            super(new GridLayout(1, 2, 1, 0));
+            this.firstValue = firstValue;
+            this.secondValue = secondValue;
+            setOpaque(false);
+
+            firstButton = new SegmentButton(firstLabel, font, true);
+            secondButton = new SegmentButton(secondLabel, font, false);
+            ButtonGroup group = new ButtonGroup();
+            group.add(firstButton);
+            group.add(secondButton);
+            if (Objects.equals(selected, secondValue)) {
+                secondButton.setSelected(true);
+            } else {
+                firstButton.setSelected(true);
+            }
+
+            ActionListener repaintBoth = e -> repaint();
+            firstButton.addActionListener(repaintBoth);
+            secondButton.addActionListener(repaintBoth);
+            add(firstButton);
+            add(secondButton);
+        }
+
+        T selected() {
+            return secondButton.isSelected() ? secondValue : firstValue;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int w = getWidth();
+                int h = getHeight();
+                Shape box = new RoundRectangle2D.Float(0, 0, w, h, BOX_ARC, BOX_ARC);
+                g2.setColor(DarculaColors.BACKGROUND_OUTSIDE);
+                g2.fill(box);
+
+                Shape clip = g2.getClip();
+                g2.clip(box);
+                paintSegmentFill(g2, firstButton);
+                paintSegmentFill(g2, secondButton);
+                g2.setColor(DarculaColors.G4);
+                int split = secondButton.getX() - 1;
+                g2.drawLine(split, 1, split, h - 2);
+                g2.setClip(clip);
+
+                boolean focused = firstButton.isFocusOwner() || secondButton.isFocusOwner();
+                g2.setColor(focused ? DarculaColors.BORDER_HIGHLIGHT : DarculaColors.G4);
+                g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, BOX_ARC, BOX_ARC));
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        private void paintSegmentFill(Graphics2D g2, SegmentButton button) {
+            ButtonModel model = button.getModel();
+            if (button.isSelected()) {
+                g2.setColor(DarculaColors.BLUE);
+                g2.fill(button.getBounds());
+            } else if (model.isRollover() || model.isPressed()) {
+                g2.setColor(DarculaColors.BACKGROUND_PLUS);
+                g2.fill(button.getBounds());
+            }
+        }
+
+        private final class SegmentButton extends JToggleButton {
+            private final Font plainFont;
+            private final Font boldFont;
+            private final boolean first;
+
+            SegmentButton(String text, Font font, boolean first) {
+                super(text);
+                this.plainFont = font;
+                this.boldFont = font.deriveFont(Font.BOLD);
+                this.first = first;
+                setFont(plainFont);
+                setContentAreaFilled(false);
+                setBorderPainted(false);
+                setFocusPainted(false);
+                setOpaque(false);
+                setRolloverEnabled(true);
+                setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                addFocusListener(new FocusAdapter() {
+                    @Override
+                    public void focusGained(FocusEvent e) {
+                        ChoiceToggle.this.repaint();
+                    }
+
+                    @Override
+                    public void focusLost(FocusEvent e) {
+                        ChoiceToggle.this.repaint();
+                    }
+                });
+                bindArrow(KeyEvent.VK_LEFT, () -> selectSibling(firstButton));
+                bindArrow(KeyEvent.VK_RIGHT, () -> selectSibling(secondButton));
+            }
+
+            private void bindArrow(int keyCode, Runnable action) {
+                String name = "segment-" + keyCode + "-" + first;
+                getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(keyCode, 0), name);
+                getActionMap().put(name, new AbstractAction() {
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        action.run();
+                    }
+                });
+            }
+
+            private void selectSibling(SegmentButton target) {
+                target.setSelected(true);
+                target.requestFocusInWindow();
+                ChoiceToggle.this.repaint();
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                FontMetrics fm = getFontMetrics(boldFont);
+                return new Dimension(fm.stringWidth(getText()) + 2 * PAD_X, fm.getHeight() + 2 * PAD_Y);
+            }
+
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                    boolean selected = isSelected();
+                    Font f = selected ? boldFont : plainFont;
+                    FontMetrics fm = g2.getFontMetrics(f);
+                    g2.setFont(f);
+                    boolean hot = getModel().isRollover() || getModel().isPressed();
+                    g2.setColor(selected || hot ? DarculaColors.FOREGROUND : DarculaColors.G7);
+                    int x = (getWidth() - fm.stringWidth(getText())) / 2;
+                    int y = (getHeight() - fm.getHeight()) / 2 + fm.getAscent();
+                    g2.drawString(getText(), x, y);
+                } finally {
+                    g2.dispose();
+                }
+            }
         }
     }
 }

@@ -62,4 +62,17 @@ class ConfigTest {
         config.setKeyHints("EMACS");
         assertThat(new Config(node).getKeyHints()).isEqualTo("EMACS");
     }
+
+    @Test
+    @DisplayName("UI layout defaults to most and round-trips win")
+    void uiLayoutRoundTrip() {
+        Config config = new Config(node);
+        assertThat(config.getUiLayout()).isEqualTo(se.grynna.pager.ui.UiLayout.MOST);
+
+        config.setUiLayout(se.grynna.pager.ui.UiLayout.WIN);
+        assertThat(new Config(node).getUiLayout()).isEqualTo(se.grynna.pager.ui.UiLayout.WIN);
+
+        config.setUiLayout(se.grynna.pager.ui.UiLayout.MOST);
+        assertThat(new Config(node).getUiLayout()).isEqualTo(se.grynna.pager.ui.UiLayout.MOST);
+    }
 }

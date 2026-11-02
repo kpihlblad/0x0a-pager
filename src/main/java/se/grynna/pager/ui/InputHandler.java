@@ -541,12 +541,11 @@ public class InputHandler {
             am.put(name, swingAction(entry.getValue()));
         }
 
-        // Legacy action names the status bar looks up at click time. The buttons
-        // must keep working, so they point at the canonical keystroke's action.
-        alias(am, am, SEARCH, UiAction.OPEN_SEARCH);
-        alias(am, containerAm, SEARCH, UiAction.OPEN_SEARCH);
-        alias(am, am, GOTO, UiAction.GOTO);
-        alias(am, containerAm, GOTO, UiAction.GOTO);
+        // Button actions the status bar looks up at click time. Unlike bare-letter
+        // keystrokes, a button click is explicit and runs even when a text field has focus.
+        bindButton(am, containerAm, SEARCH, UiAction.OPEN_SEARCH);
+        bindButton(am, containerAm, GOTO, UiAction.GOTO);
+        bindButton(am, containerAm, LOGIN, UiAction.LOGIN);
 
         // Preferences - accessible from hamburger menu, no keystroke of its own
         am.put(PREFERENCES, action(viewPort::showPreferences));
@@ -684,11 +683,23 @@ public class InputHandler {
         return KeyBinding.Context.LOG_VIEW;
     }
 
-    private void alias(ActionMap source, ActionMap target, Object name, UiAction action) {
-        Action actionForKey = source.get(action.name());
-        if (actionForKey != null) {
-            target.put(name, actionForKey);
+    private void bindButton(ActionMap am, ActionMap containerAm, Actions name, UiAction uiAction) {
+        KeyHandler handler = handlers.get(uiAction);
+        if (handler == null) {
+            return;
         }
+        KeyBinding binding = keyMap.canonical(uiAction);
+        AbstractAction buttonAction = action(() -> {
+            endSearchGuard.reset();
+            doubleTapGuard.reset();
+            if (DEFERRED.contains(uiAction)) {
+                SwingUtilities.invokeLater(() -> run(handler, binding));
+            } else {
+                run(handler, binding);
+            }
+        });
+        am.put(name, buttonAction);
+        containerAm.put(name, buttonAction);
     }
 
     private AbstractAction action(ThrowingRunnable task) {

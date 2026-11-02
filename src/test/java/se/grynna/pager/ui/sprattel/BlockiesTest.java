@@ -1,10 +1,14 @@
 package se.grynna.pager.ui.sprattel;
 
 import org.junit.jupiter.api.Test;
+import se.grynna.pager.ui.sprattel.Blockies.Series;
 import se.grynna.pager.ui.sprattel.Blockies.Tone;
+import se.grynna.pager.utils.DarculaColors;
 import se.grynna.pager.utils.OKLab;
+import se.grynna.pager.utils.Theme;
 
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -128,30 +132,74 @@ class BlockiesTest {
 
     @Test
     void backgroundIsDarkerThanForegroundForEachTone() {
-        for (Tone tone : Tone.values()) {
-            for (int i = 0; i < 10; i++) {
-                var palette = Blockies.palette("node-" + i, "node-" + i + "/t", tone);
+        for (Series series : Series.values()) {
+            for (Tone tone : Tone.values()) {
+                for (int i = 0; i < 10; i++) {
+                    var palette = Blockies.palette("node-" + i, "node-" + i + "/t", null, tone, series);
 
-                assertThat(lightness(palette.background()))
-                        .as("%s background of seed %d", tone, i)
-                        .isLessThan(lightness(palette.color()));
+                    assertThat(lightness(palette.background()))
+                            .as("%s %s background of seed %d", series, tone, i)
+                            .isLessThan(lightness(palette.color()));
+                }
             }
         }
     }
 
     @Test
     void dimPaletteIsLessLightThanBrightForTheSameSeeds() {
-        for (int i = 0; i < 10; i++) {
-            var bright = Blockies.palette("node-" + i, "node-" + i + "/t", Tone.BRIGHT);
-            var dim = Blockies.palette("node-" + i, "node-" + i + "/t", Tone.DIM);
+        for (Series series : Series.values()) {
+            for (int i = 0; i < 10; i++) {
+                var bright = Blockies.palette("node-" + i, "node-" + i + "/t", null, Tone.BRIGHT, series);
+                var dim = Blockies.palette("node-" + i, "node-" + i + "/t", null, Tone.DIM, series);
 
-            assertThat(lightness(dim.color())).isLessThan(lightness(bright.color()));
-            assertThat(lightness(dim.spot())).isLessThan(lightness(bright.spot()));
-            assertThat(lightness(dim.background())).isLessThan(lightness(bright.background()));
+                assertThat(lightness(dim.color())).isLessThan(lightness(bright.color()));
+                assertThat(lightness(dim.spot())).isLessThan(lightness(bright.spot()));
+                assertThat(lightness(dim.background())).isLessThan(lightness(bright.background()));
+            }
+        }
+    }
+
+    @Test
+    void pastelIsLighterThanDarkForTheSameSeeds() {
+        for (Tone tone : Tone.values()) {
+            for (int i = 0; i < 10; i++) {
+                var dark = Blockies.palette("node-" + i, "node-" + i + "/t", "spot-" + i, tone, Series.DARK);
+                var pastel = Blockies.palette("node-" + i, "node-" + i + "/t", "spot-" + i, tone, Series.PASTEL);
+
+                assertThat(lightness(pastel.background())).isGreaterThan(lightness(dark.background()));
+                assertThat(lightness(pastel.color())).isGreaterThan(lightness(dark.color()));
+                assertThat(lightness(pastel.spot())).isGreaterThan(lightness(dark.spot()));
+            }
+        }
+    }
+
+    @Test
+    void lightThemeCachesASeparateLighterIcon() {
+        try {
+            DarculaColors.use(Theme.DARK);
+            var dark = blockies.icon("node-a|p", "node-a|p/t", Tone.BRIGHT, SIZE, SCALE);
+            DarculaColors.use(Theme.LIGHT);
+            var light = blockies.icon("node-a|p", "node-a|p/t", Tone.BRIGHT, SIZE, SCALE);
+
+            assertThat(light).isNotSameAs(dark);
+            assertThat(averageLightness(light)).isGreaterThan(averageLightness(dark));
+        } finally {
+            DarculaColors.use(Theme.DARK);
         }
     }
 
     private static float lightness(Color color) {
         return OKLab.colorToOklab(color).L();
+    }
+
+    private static float averageLightness(BufferedImage image) {
+        double sum = 0;
+        int n = image.getWidth() * image.getHeight();
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                sum += lightness(new Color(image.getRGB(x, y), true));
+            }
+        }
+        return (float) (sum / n);
     }
 }

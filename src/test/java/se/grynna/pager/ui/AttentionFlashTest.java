@@ -117,4 +117,51 @@ class AttentionFlashTest {
         assertThat(flash.isRunning()).isFalse();
         assertThat(flash.intensity()).isZero();
     }
+
+    @Test
+    void doubleCurvePopsTwiceWithAGapBetween() {
+        int second = AttentionFlash.DURATION_MILLIS + AttentionFlash.DOUBLE_GAP_MILLIS;
+        assertThat(AttentionFlash.intensity(AttentionFlash.POP_MILLIS, true, 0)).isEqualTo(1f);
+        assertThat(AttentionFlash.intensity(AttentionFlash.DURATION_MILLIS + 1, true, 0)).isZero();
+        assertThat(AttentionFlash.intensity(second + AttentionFlash.POP_MILLIS, true, 0)).isEqualTo(1f);
+        assertThat(AttentionFlash.intensity(AttentionFlash.DOUBLE_DURATION_MILLIS, true, 0)).isZero();
+    }
+
+    @Test
+    void reminderPopsOnlyAtItsInterval() {
+        int interval = AttentionFlash.REPEAT_INTERVAL_MILLIS;
+        assertThat(AttentionFlash.intensity(interval - 1, true, interval)).isZero();
+        assertThat(AttentionFlash.intensity(interval + AttentionFlash.POP_MILLIS, true, interval)).isEqualTo(1f);
+        assertThat(AttentionFlash.intensity(interval + AttentionFlash.DURATION_MILLIS, true, interval)).isZero();
+        assertThat(AttentionFlash.intensity(2L * interval + AttentionFlash.POP_MILLIS, true, interval)).isEqualTo(1f);
+    }
+
+    @Test
+    void doubleFlashRunsTwiceThenWaitsForItsReminder() throws Exception {
+        SwingUtilities.invokeAndWait(() -> flash.startDouble(AttentionFlash.REPEAT_INTERVAL_MILLIS));
+
+        assertThat(flash.isRepeating()).isTrue();
+        clock.addAndGet(AttentionFlash.DURATION_MILLIS + AttentionFlash.DOUBLE_GAP_MILLIS);
+        assertThat(flash.isRunning()).as("second pulse still to come").isTrue();
+
+        clock.addAndGet(AttentionFlash.DOUBLE_DURATION_MILLIS - AttentionFlash.DURATION_MILLIS
+                - AttentionFlash.DOUBLE_GAP_MILLIS);
+        assertThat(flash.isRunning()).as("quiet between pulses").isFalse();
+        assertThat(flash.intensity()).isZero();
+
+        clock.addAndGet(AttentionFlash.REPEAT_INTERVAL_MILLIS - AttentionFlash.DOUBLE_DURATION_MILLIS
+                + AttentionFlash.POP_MILLIS);
+        assertThat(flash.isRunning()).isTrue();
+        assertThat(flash.intensity()).isEqualTo(1f);
+    }
+
+    @Test
+    void stopDisarmsTheReminders() throws Exception {
+        SwingUtilities.invokeAndWait(() -> flash.startDouble(AttentionFlash.REPEAT_INTERVAL_MILLIS));
+
+        SwingUtilities.invokeAndWait(flash::stop);
+
+        assertThat(flash.isRepeating()).isFalse();
+        assertThat(flash.isRunning()).isFalse();
+    }
 }

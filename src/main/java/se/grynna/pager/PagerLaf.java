@@ -2,6 +2,7 @@ package se.grynna.pager;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import se.grynna.pager.ui.Fontalizer;
 import se.grynna.pager.utils.DarculaColors;
 import se.grynna.pager.utils.Theme;
@@ -28,9 +29,19 @@ public class PagerLaf extends FlatDarkLaf {
      */
     public static boolean install(Theme theme) {
         Fontalizer.installUiFonts();
+        FlatSVGIcon.ColorFilter.getInstance().setMapper(colour -> svgColour(colour, theme));
         boolean installed = FlatLaf.setup(theme == Theme.LIGHT ? new PagerLightLaf() : new PagerLaf());
         UIManager.put("Button.default.foreground", DarculaColors.ORANGE);
         return installed;
+    }
+
+    /** Remaps the neutral stroke/fill of bundled SVG icons ({@code #969696}) to a colour that reads on {@code theme}. */
+    private static java.awt.Color svgColour(java.awt.Color colour, Theme theme) {
+        if ((colour.getRGB() & 0xffffff) == 0x969696) {
+            int rgb = theme == Theme.LIGHT ? 0x2c2e38 : 0xf0f0e8;
+            return new java.awt.Color((colour.getAlpha() << 24) | rgb, true);
+        }
+        return colour;
     }
 
     @Override

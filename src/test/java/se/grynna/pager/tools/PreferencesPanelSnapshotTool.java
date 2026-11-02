@@ -36,6 +36,8 @@ class PreferencesPanelSnapshotTool {
         Config config = mock(Config.class);
         when(config.getZoneId()).thenReturn(ZoneId.of("Europe/Stockholm"));
         when(config.getLocale()).thenReturn(Locale.forLanguageTag("sv-SE"));
+        when(config.getTheme()).thenReturn(se.grynna.pager.utils.Theme.DARK);
+        when(config.getUiLayout()).thenReturn(se.grynna.pager.ui.UiLayout.MOST);
         when(config.getKeyHints()).thenReturn("DESKTOP");
         when(config.getShowMinimap()).thenReturn(true);
 

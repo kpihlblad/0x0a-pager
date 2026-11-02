@@ -7,7 +7,6 @@ import se.grynna.pager.utils.DarculaColors;
 
 import javax.swing.ActionMap;
 import javax.swing.JButton;
-import javax.swing.JPopupMenu;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;

@@ -1,6 +1,8 @@
 package se.grynna.pager.ui.sprattel;
 
+import se.grynna.pager.utils.DarculaColors;
 import se.grynna.pager.utils.OKLab;
+import se.grynna.pager.utils.Theme;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -96,7 +98,8 @@ public final class Blockies {
      * Icon for an activity: the background colour comes from {@code colourSeed} (machine and process), the shape and
      * foreground colour from {@code patternSeed} (the same plus the thread), and the spot colour from {@code spotSeed}
      * (the same plus the request). A null or pattern-equal spot seed takes the spot from the pattern stream. A null
-     * seed falls back to the other; both null is an error, callers fall back to the message themselves.
+     * seed falls back to the other; both null is an error, callers fall back to the message themselves. The series
+     * follows the current theme: pastel on the light theme, mid-lightness otherwise.
      *
      * @param tone {@link Tone#BRIGHT} for structured events, {@link Tone#DIM} for raw ones
      * @param size grid cells per side; 0 applies the default
@@ -111,8 +114,8 @@ public final class Blockies {
         }
         Objects.requireNonNull(tone, "tone");
         String spot = spotSeed == null || spotSeed.equals(pattern) ? null : spotSeed;
-        ActivityKey key = new ActivityKey(colour, pattern, spot, tone, size > 0 ? size : DEFAULT_SIZE,
-                scale > 0 ? scale : DEFAULT_SCALE);
+        ActivityKey key = new ActivityKey(colour, pattern, spot, tone, Series.current(),
+                size > 0 ? size : DEFAULT_SIZE, scale > 0 ? scale : DEFAULT_SCALE);
         return cached(key, () -> renderActivityIcon(key));
     }
 
@@ -148,11 +151,10 @@ public final class Blockies {
 
         BlockiesRandom random = seeded(seed);
 
-        Color color = safe.color != null ? safe.color : createColor(random, Tone.BRIGHT.foreground);
-        Color background = safe.backgroundColor != null
-                ? safe.backgroundColor
-                : createColor(random, Tone.BRIGHT.foreground);
-        Color spot = safe.spotColor != null ? safe.spotColor : createColor(random, Tone.BRIGHT.foreground);
+        Range foreground = Series.DARK.foreground(Tone.BRIGHT);
+        Color color = safe.color != null ? safe.color : createColor(random, foreground);
+        Color background = safe.backgroundColor != null ? safe.backgroundColor : createColor(random, foreground);
+        Color spot = safe.spotColor != null ? safe.spotColor : createColor(random, foreground);
 
         SeedKey key = new SeedKey(seed, size, scale, color, background, spot);
         return new ResolvedOptions(key, random);
@@ -166,7 +168,8 @@ public final class Blockies {
 
     private static BufferedImage renderActivityIcon(ActivityKey key) {
         BlockiesRandom pattern = seeded(key.patternSeed());
-        Palette palette = palette(key.colourSeed(), key.patternSeed(), key.spotSeed(), key.tone(), pattern);
+        Palette palette = palette(key.colourSeed(), key.patternSeed(), key.spotSeed(), key.tone(), key.series(),
+                pattern);
         int[] imageData = createImageData(pattern, key.size(), true);
         return paint(key.size(), key.scale(), palette.background(), palette.color(), palette.spot(), imageData);
     }
@@ -203,21 +206,25 @@ public final class Blockies {
      * depend on the spot seed.
      */
     static Palette palette(String colourSeed, String patternSeed, Tone tone) {
-        return palette(colourSeed, patternSeed, null, tone);
+        return palette(colourSeed, patternSeed, null, tone, Series.DARK);
     }
 
     static Palette palette(String colourSeed, String patternSeed, String spotSeed, Tone tone) {
-        return palette(colourSeed, patternSeed, spotSeed, tone, seeded(patternSeed));
+        return palette(colourSeed, patternSeed, spotSeed, tone, Series.DARK);
     }
 
-    private static Palette palette(String colourSeed, String patternSeed, String spotSeed, Tone tone,
+    static Palette palette(String colourSeed, String patternSeed, String spotSeed, Tone tone, Series series) {
+        return palette(colourSeed, patternSeed, spotSeed, tone, series, seeded(patternSeed));
+    }
+
+    private static Palette palette(String colourSeed, String patternSeed, String spotSeed, Tone tone, Series series,
             BlockiesRandom pattern) {
-        Color background = createColor(seeded(colourSeed), tone.background);
-        Color color = createColor(pattern, tone.foreground);
-        createColor(pattern, tone.background);
-        Color spot = createColor(pattern, tone.foreground);
+        Color background = createColor(seeded(colourSeed), series.background(tone));
+        Color color = createColor(pattern, series.foreground(tone));
+        createColor(pattern, series.background(tone));
+        Color spot = createColor(pattern, series.foreground(tone));
         if (spotSeed != null && !spotSeed.equals(patternSeed)) {
-            spot = createColor(seeded(spotSeed), tone.foreground);
+            spot = createColor(seeded(spotSeed), series.foreground(tone));
         }
         return new Palette(background, color, spot);
     }
@@ -286,15 +293,42 @@ public final class Blockies {
      * Palette tone. BRIGHT is for structured (JSON) events; DIM, lower in lightness and chroma, is for raw events.
      */
     public enum Tone {
-        BRIGHT(new Range(0.45, 0.10, 0.10, 0.08), new Range(0.55, 0.20, 0.10, 0.08)), DIM(
-                new Range(0.30, 0.08, 0.05, 0.05), new Range(0.38, 0.12, 0.05, 0.05));
+        BRIGHT, DIM
+    }
 
-        private final Range background;
-        private final Range foreground;
+    /**
+     * Colour series for a theme. {@link #DARK} is the mid-lightness palette of the dark theme. {@link #PASTEL} is the
+     * light-theme palette: high lightness and low chroma.
+     */
+    enum Series {
+        DARK(new Range(0.45, 0.10, 0.10, 0.08), new Range(0.55, 0.20, 0.10, 0.08),
+                new Range(0.30, 0.08, 0.05, 0.05), new Range(0.38, 0.12, 0.05, 0.05)), PASTEL(
+                        new Range(0.70, 0.08, 0.07, 0.05), new Range(0.80, 0.08, 0.10, 0.06),
+                        new Range(0.62, 0.06, 0.04, 0.03), new Range(0.70, 0.08, 0.06, 0.05));
 
-        Tone(Range background, Range foreground) {
-            this.background = background;
-            this.foreground = foreground;
+        private final Range brightBackground;
+        private final Range brightForeground;
+        private final Range dimBackground;
+        private final Range dimForeground;
+
+        Series(Range brightBackground, Range brightForeground, Range dimBackground, Range dimForeground) {
+            this.brightBackground = brightBackground;
+            this.brightForeground = brightForeground;
+            this.dimBackground = dimBackground;
+            this.dimForeground = dimForeground;
+        }
+
+        Range background(Tone tone) {
+            return tone == Tone.BRIGHT ? brightBackground : dimBackground;
+        }
+
+        Range foreground(Tone tone) {
+            return tone == Tone.BRIGHT ? brightForeground : dimForeground;
+        }
+
+        /** The series painted for the theme whose palette is current. */
+        static Series current() {
+            return DarculaColors.theme() == Theme.LIGHT ? PASTEL : DARK;
         }
     }
 
@@ -305,8 +339,8 @@ public final class Blockies {
     private record SeedKey(String seed, int size, int scale, Color color, Color background, Color spotColor)
             implements CacheKey {}
 
-    private record ActivityKey(String colourSeed, String patternSeed, String spotSeed, Tone tone, int size, int scale)
-            implements CacheKey {}
+    private record ActivityKey(String colourSeed, String patternSeed, String spotSeed, Tone tone, Series series,
+            int size, int scale) implements CacheKey {}
 
     private record ResolvedOptions(SeedKey key, BlockiesRandom random) {}
 

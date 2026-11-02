@@ -61,11 +61,54 @@ class StatusBarAttentionFlashTest {
     }
 
     @Test
-    void theFlashEndsAfterHalfASecond() throws Exception {
+    void theDoublePulseEndsAfterItsSecondPulse() throws Exception {
         onEdt(() -> {
             statusBar.setSearchInputActive(true);
-            clock.addAndGet(AttentionFlash.DURATION_MILLIS + 1);
+            clock.addAndGet(AttentionFlash.DOUBLE_DURATION_MILLIS + 1);
             assertThat(statusBar.inputFlash().isRunning()).isFalse();
+        });
+    }
+
+    @Test
+    void aWaitingBarRemindsAgainAfterTheRepeatInterval() throws Exception {
+        onEdt(() -> {
+            statusBar.setSearchInputActive(true);
+            clock.addAndGet(AttentionFlash.REPEAT_INTERVAL_MILLIS + AttentionFlash.POP_MILLIS);
+            assertThat(statusBar.inputFlash().isRunning()).isTrue();
+            assertThat(statusBar.inputFlash().intensity()).isEqualTo(1f);
+        });
+    }
+
+    @Test
+    void leavingTheWaitingStateStopsTheReminders() throws Exception {
+        onEdt(() -> {
+            statusBar.setSearchInputActive(true);
+            statusBar.setSearchInputActive(false);
+            assertThat(statusBar.inputFlash().isRepeating()).isFalse();
+        });
+    }
+
+    @Test
+    void reRaisingTheSamePromptFlashesAgain() throws Exception {
+        onEdt(() -> {
+            statusBar.showScopeConfirmPrompt("2 bookmarks are outside the new scope. Continue?");
+            statusBar.inputFlash().stop();
+
+            statusBar.showScopeConfirmPrompt("2 bookmarks are outside the new scope. Continue?");
+
+            assertThat(statusBar.inputFlash().isRunning()).isTrue();
+        });
+    }
+
+    @Test
+    void prefillingAnOpenSearchInputFlashesAgain() throws Exception {
+        onEdt(() -> {
+            statusBar.setSearchInputActive(true);
+            statusBar.inputFlash().stop();
+
+            statusBar.prefillSearchInput("timeout");
+
+            assertThat(statusBar.inputFlash().isRunning()).isTrue();
         });
     }
 

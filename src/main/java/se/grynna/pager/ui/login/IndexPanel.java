@@ -854,6 +854,11 @@ public class IndexPanel extends JPanel {
         }
     }
 
+    /** Cancels the scope panel and runs its cancel callback. */
+    public void cancel() {
+        handleCancel();
+    }
+
     private void handleCancel() {
         log.info("handleCancel: Cancelling");
         suggestedFieldsPanel.setLoading(false);

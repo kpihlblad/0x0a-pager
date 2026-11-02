@@ -65,11 +65,27 @@ class ThemeSwitchTest {
     }
 
     @Test
-    void applyingTheLightThemeInstallsTheLightLookAndFeel() {
+    void applyingTheLightThemeInstallsTheLightLookAndFeelAndDarkensSvgIcons() {
         ThemeSwitch.apply(Theme.LIGHT);
 
         assertThat(DarculaColors.theme()).isEqualTo(Theme.LIGHT);
         assertThat(UIManager.getLookAndFeel()).isInstanceOf(PagerLightLaf.class);
+
+        var icon = new com.formdev.flatlaf.extras.FlatSVGIcon("search.svg", 16, 16);
+        java.awt.image.BufferedImage lightImg = new java.awt.image.BufferedImage(16, 16,
+                java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D gLight = lightImg.createGraphics();
+        icon.paintIcon(null, gLight, 0, 0);
+        gLight.dispose();
+
+        ThemeSwitch.apply(Theme.DARK);
+        java.awt.image.BufferedImage darkImg = new java.awt.image.BufferedImage(16, 16,
+                java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D gDark = darkImg.createGraphics();
+        icon.paintIcon(null, gDark, 0, 0);
+        gDark.dispose();
+
+        assertThat(opaqueLightness(lightImg)).isLessThan(opaqueLightness(darkImg));
     }
 
     @Test
@@ -146,5 +162,20 @@ class ThemeSwitchTest {
         assertThat(palette)
                 .as("%s (%s) on %s", role, colour, owner.getClass().getName())
                 .contains(colour);
+    }
+
+    private static double opaqueLightness(java.awt.image.BufferedImage img) {
+        double sum = 0;
+        int count = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                if (((argb >>> 24) & 0xff) > 128) {
+                    sum += se.grynna.pager.utils.OKLab.colorToOklab(new Color(argb, true)).L();
+                    count++;
+                }
+            }
+        }
+        return count == 0 ? 0 : sum / count;
     }
 }

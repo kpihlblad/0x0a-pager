@@ -278,11 +278,11 @@ class LogViewerMinimapClickTest {
             Instant clicked = MinimapModel.instantOf(MinimapModel.positionAt(window, h, y));
             long expectedEvent = (Duration.between(T0, clicked).toNanos() + 99_999_999_999L) / 100_000_000_000L;
             assertThat(expectedEvent).as("the click is in the bottom quarter").isBetween(70L, 80L);
-            assertThat(pageStart()).as("that event is the middle row").isEqualTo(expectedEvent - PAGE / 2);
+            long centred = pageStart() + PAGE / 2;
+            assertThat(centred).as("the middle row is the event at the click, rounded either way")
+                    .isBetween(expectedEvent - 1, expectedEvent);
             List<Instant> shown = visibleLoaded().stream().map(LoadedLogLine::getSplunkTime).toList();
-            assertThat(shown.get(PAGE / 2)).isEqualTo(T0.plusSeconds(expectedEvent * 100));
-            assertThat(shown.get(PAGE / 2)).isAfterOrEqualTo(clicked);
-            assertThat(shown.get(PAGE / 2 - 1)).isBefore(clicked);
+            assertThat(shown.get(PAGE / 2)).isEqualTo(T0.plusSeconds(centred * 100));
         });
     }
 

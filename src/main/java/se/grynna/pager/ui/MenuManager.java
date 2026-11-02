@@ -4,6 +4,7 @@ import javax.swing.*;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
 import java.awt.*;
+import java.awt.event.MouseEvent;
 
 public class MenuManager {
 
@@ -25,12 +26,16 @@ public class MenuManager {
     private final JMenuItem rangeItem;
     private final JMenuItem helpItem;
     private final JCheckBoxMenuItem cursorItem;
-    private final JCheckBoxMenuItem lightModeItem;
 
     public MenuManager(LogViewer viewer) {
         KeyMap keyMap = KeyMap.preferred();
-        hamburgerButton = new JButton("☰");
-        hamburgerButton.setMargin(new Insets(0, 5, 0, 5));
+        hamburgerButton = new JButton("☰") {
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
+        hamburgerButton.setToolTipText("Menu");
         hamburgerButton.setFocusable(false); // Don't steal focus - keyboard events should go to main actions
         popupMenu = new JPopupMenu();
 
@@ -103,7 +108,6 @@ public class MenuManager {
                 helpItem.setText(helpText(keyMap));
                 cursorItem.setText(cursorText(keyMap));
                 cursorItem.setSelected(viewer.isCursorMode());
-                lightModeItem.setSelected(viewer.isLightMode());
                 bookmarkItem.setText(bookmarkText(keyMap));
                 bookmarkItem.setEnabled(viewer.hasLogLines());
                 narrowActivityItem.setText(narrowActivityText(keyMap));
@@ -131,10 +135,6 @@ public class MenuManager {
 
         popupMenu.addSeparator();
 
-        lightModeItem = new JCheckBoxMenuItem("Light mode");
-        lightModeItem.addActionListener(e -> viewer.toggleLightMode());
-        popupMenu.add(lightModeItem);
-
         JMenuItem preferencesItem = new JMenuItem("Preferences...");
         preferencesItem.addActionListener(e -> viewer.showPreferences());
         popupMenu.add(preferencesItem);
@@ -148,7 +148,10 @@ public class MenuManager {
         hamburgerButton.addActionListener(e -> {
             Dimension menuSize = popupMenu.getPreferredSize();
             int xOffset = hamburgerButton.getWidth() - menuSize.width;
-            int yOffset = -menuSize.height;
+            Point above = InWindowToolTip.locationFor(hamburgerButton,
+                    new MouseEvent(hamburgerButton, MouseEvent.MOUSE_MOVED, 0, 0, hamburgerButton.getWidth() / 2, 0, 0,
+                            false));
+            int yOffset = above != null && above.y > 0 ? hamburgerButton.getHeight() : -menuSize.height;
             popupMenu.show(hamburgerButton, xOffset, yOffset);
         });
     }

@@ -24,8 +24,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import static se.grynna.pager.ui.Actions.GOTO;
+import static se.grynna.pager.ui.Actions.LOGIN;
 import static se.grynna.pager.ui.Actions.SEARCH;
 import static se.grynna.pager.utils.DarculaColors.FOREGROUND;
 
@@ -42,7 +44,7 @@ import static se.grynna.pager.utils.DarculaColors.FOREGROUND;
  * <h3>Bottom row (input):</h3>
  * <ul>
  *   <li>Left: Prompt message and input field</li>
- *   <li>Right: Hamburger menu button</li>
+ *   <li>Right: Scope, go-to-time, search and menu buttons</li>
  * </ul>
  * <p>
  * The date field serves dual purposes:
@@ -110,6 +112,10 @@ public class StatusBar extends JPanel {
     /** LOG / MATCHES n / BOOKMARKS n / DETAILS at the left of the status row; also the view indicator. */
     private final ViewTabs viewTabs;
     private final JPanel statusRow;
+    private final JPanel inputRow;
+    private final JPanel winButtonsPlaceholder;
+    private final JPanel macButtonsPlaceholder;
+    private UiLayout uiLayout = UiLayout.MOST;
     /** Pop-and-fade flash of the input bar when it starts needing input; painted by {@link InputFlashLayerUI}. */
     private final AttentionFlash inputFlash;
     private final JLayer<JComponent> inputFlashLayer;
@@ -232,6 +238,9 @@ public class StatusBar extends JPanel {
         statusRow.setLayout(new BoxLayout(statusRow, BoxLayout.X_AXIS));
         statusRow.setBackground(DarculaColors.MIDNIGHT_BLUE);
         statusRow.setOpaque(true);
+        statusRow.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G4),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G3)));
 
         // Search spinner - small indeterminate progress indicator
         searchSpinner = new SpinnerProgress();
@@ -252,10 +261,16 @@ public class StatusBar extends JPanel {
         viewTabs = new ViewTabs(font, clockMillis);
         viewTabs.setOnSelect(this::selectTab);
 
+        macButtonsPlaceholder = new JPanel();
+        macButtonsPlaceholder.putClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER,
+                "mac zeroInFullScreen");
+        macButtonsPlaceholder.setVisible(false);
+
         leftPanel = new JPanel();
         leftPanel.setBackground(DarculaColors.MIDNIGHT_BLUE);
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.X_AXIS));
         leftPanel.setOpaque(true);
+        leftPanel.add(macButtonsPlaceholder);
         leftPanel.add(viewTabs);
         leftPanel.add(Box.createHorizontalStrut(HPAD));
         leftPanel.add(timeGroup);
@@ -293,11 +308,17 @@ public class StatusBar extends JPanel {
         });
 
         // Right end of the bar: the scope chips sit right-aligned before the scroll-lock slot and the size.
+        winButtonsPlaceholder = new JPanel();
+        winButtonsPlaceholder.putClientProperty(FlatClientProperties.FULL_WINDOW_CONTENT_BUTTONS_PLACEHOLDER,
+                "win zeroInFullScreen");
+        winButtonsPlaceholder.setVisible(false);
+
         JPanel indicators = new JPanel();
         indicators.setLayout(new BoxLayout(indicators, BoxLayout.X_AXIS));
         indicators.setOpaque(false);
         indicators.add(scrollLockBadge);
         indicators.add(statusBaseDirSize);
+        indicators.add(winButtonsPlaceholder);
 
         rightPanel = new JPanel(new BorderLayout(HPAD, 0));
         rightPanel.setForeground(FOREGROUND);
@@ -317,9 +338,10 @@ public class StatusBar extends JPanel {
         statusRow.add(rightPanel);
 
         // === Bottom row: Input bar ===
-        JPanel inputRow = new JPanel(new BorderLayout(0, 0));
+        inputRow = new JPanel(new BorderLayout(0, 0));
         inputRow.setBackground(DarculaColors.BACKGROUND);
         inputRow.setOpaque(true);
+        applyRowBorders();
 
         // Prompt field - shows state message
         promptField = new JTextField();
@@ -332,13 +354,13 @@ public class StatusBar extends JPanel {
 
         // Prompt button (OK / Cancel) - only visible during boundary expansion
         boundaryPromptButton = createButton(null);
-        boundaryPromptButton.setFont(font);
-        boundaryPromptButton.setBackground(DarculaColors.BACKGROUND);
+        styleChromeButton(boundaryPromptButton, font, false);
         boundaryPromptButton.addActionListener(e -> logViewer.actionAcceptBoundaryExpansion(true));
 
         boundaryCancelButton = createButton(null);
         boundaryCancelButton.setFont(font);
         boundaryCancelButton.setBackground(DarculaColors.BACKGROUND);
+        boundaryCancelButton.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
         boundaryCancelButton.setBorder(BorderFactory.createEmptyBorder(VPAD, 0, VPAD, 0));
         boundaryCancelButton.setIcon(cancelIcon);
         boundaryCancelButton.addActionListener(e -> logViewer.actionAcceptBoundaryExpansion(false));
@@ -505,50 +527,44 @@ public class StatusBar extends JPanel {
             }
         });
 
-        // Search button and goto button
-        // Actions are looked up at click time because InputHandler.setup() runs after StatusBar construction
-        JButton searchButton = new JButton();
-        FlatSVGIcon searchIcon = new FlatSVGIcon("search.svg", preferredIconSize, preferredIconSize);
-        searchButton.setIcon(searchIcon);
-        searchButton.setFocusable(false);
-        searchButton.setBackground(DarculaColors.BACKGROUND);
-        searchButton.setForeground(FOREGROUND);
-        searchButton.addActionListener(e -> {
-            Action action = logViewer.getActionMap().get(SEARCH);
-            if (action != null) {
-                action.actionPerformed(e);
-            }
-        });
+        // Right-side action buttons: Scope, Go to a time, Search and the menu. Their tooltips follow the key map
+        // preference, so they are read each time they are shown.
+        JButton filterButton = createActionBarButton("filter.svg", () -> MenuManager.loginText(KeyMap.preferred()),
+                LOGIN, logViewer::actionLogin);
+        JButton gotoButton = createActionBarButton("goto.svg",
+                () -> "Go to a time (" + KeyMap.preferred().label(UiAction.GOTO) + ")", GOTO,
+                () -> logViewer.openTimePanel(se.grynna.pager.ui.time.TimePanel.Focus.AT));
+        JButton searchButton = createActionBarButton("search.svg",
+                () -> "Search (" + KeyMap.preferred().label(UiAction.OPEN_SEARCH) + ")", SEARCH,
+                () -> logViewer.openSearchPrompt(null));
+        List<JButton> actionButtons = List.of(filterButton, gotoButton, searchButton, hamburgerButton);
+        for (JButton button : actionButtons) {
+            styleActionBarButton(button, font);
+        }
+        Dimension actionSize = new Dimension();
+        for (JButton button : actionButtons) {
+            Dimension preferred = button.getPreferredSize();
+            actionSize.width = Math.max(actionSize.width, preferred.width);
+            actionSize.height = Math.max(actionSize.height, preferred.height);
+        }
+        for (JButton button : actionButtons) {
+            button.setPreferredSize(actionSize);
+            button.setMinimumSize(actionSize);
+            button.setMaximumSize(actionSize);
+        }
 
-        JButton gotoButton = new JButton();
-        gotoButton.setFont(font);
-        FlatSVGIcon gotoIcon = new FlatSVGIcon("goto.svg", preferredIconSize, preferredIconSize);
-        gotoButton.setIcon(gotoIcon);
-        gotoButton.setFocusable(false);
-        gotoButton.setBackground(DarculaColors.BACKGROUND);
-        gotoButton.setForeground(FOREGROUND);
-        gotoButton.addActionListener(e -> {
-            Action action = logViewer.getActionMap().get(GOTO);
-            if (action != null) {
-                action.actionPerformed(e);
-            }
-        });
-
-        // Buttons bar (WEST in input row)
-        // Stacking buttons to the left of the input field
-        // Goto, Search, and Hamburger.
-
+        // Buttons bar (EAST in input row): Scope, Go to a time, Search, and the menu.
         JPanel buttonsBar = new JPanel();
         buttonsBar.setLayout(new BoxLayout(buttonsBar, BoxLayout.X_AXIS));
         buttonsBar.setBackground(DarculaColors.BACKGROUND);
+        buttonsBar.setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 2));
+        buttonsBar.add(filterButton);
+        buttonsBar.add(Box.createHorizontalStrut(2));
         buttonsBar.add(gotoButton);
+        buttonsBar.add(Box.createHorizontalStrut(2));
         buttonsBar.add(searchButton);
+        buttonsBar.add(Box.createHorizontalStrut(2));
         buttonsBar.add(hamburgerButton);
-
-        // Hamburger button styling
-        hamburgerButton.setFocusable(false);
-        hamburgerButton.setBackground(DarculaColors.BACKGROUND);
-        hamburgerButton.setForeground(FOREGROUND);
 
         inputRow.add(inputBarLeft, BorderLayout.CENTER);
         inputRow.add(buttonsBar, BorderLayout.EAST);
@@ -590,6 +606,17 @@ public class StatusBar extends JPanel {
         return inputFlash;
     }
 
+    /**
+     * Flash the input bar again for a prompt that is already open, so a repeated request is noticed. Entering a
+     * waiting state flashes through {@link #setState}; this covers requests that leave the state unchanged. Modal
+     * states do not wait for input, so they do not flash.
+     */
+    private void flashAgainIfWaiting() {
+        if (inputState.needsInput()) {
+            inputFlash.startDouble(AttentionFlash.REPEAT_INTERVAL_MILLIS);
+        }
+    }
+
     /** The blue-bar centre's attention flash, for tests. */
     AttentionFlash centerFlash() {
         return centerFlash;
@@ -619,6 +646,46 @@ public class StatusBar extends JPanel {
         boundaryPromptButton.setVisible(promptVisible);
         boundaryPromptButton.setEnabled(promptVisible);
         boundaryPromptYN.setVisible(promptVisible);
+    }
+
+    /**
+     * A right-side action button with the icon {@code icon}, running the view action {@code actionKey} on click (or
+     * {@code fallback} when the viewer's action map was not populated).
+     */
+    private JButton createActionBarButton(String icon, Supplier<String> tooltip, Object actionKey, Runnable fallback) {
+        JButton button = new JButton(new FlatSVGIcon(icon, preferredIconSize, preferredIconSize)) {
+            @Override
+            public String getToolTipText() {
+                return tooltip.get();
+            }
+
+            @Override
+            public Point getToolTipLocation(MouseEvent event) {
+                return InWindowToolTip.locationFor(this, event);
+            }
+        };
+        button.addActionListener(e -> {
+            Action action = logViewer.getActionMap().get(actionKey);
+            if (action != null) {
+                action.actionPerformed(e);
+            } else {
+                fallback.run();
+            }
+        });
+        return button;
+    }
+
+    /** The right-side action buttons: one raised, pressable look with a hand cursor and a round-rect outline. */
+    private static void styleActionBarButton(JButton button, Font font) {
+        button.setFont(font);
+        button.setFocusable(false);
+        button.setBackground(DarculaColors.BACKGROUND_PLUS);
+        button.setForeground(FOREGROUND);
+        button.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
+        button.putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0);
+        button.putClientProperty(FlatClientProperties.MINIMUM_HEIGHT, 0);
+        button.setMargin(new Insets(0, 4, 0, 4));
+        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
     }
 
     private static JButton createButton(String text) {
@@ -811,6 +878,7 @@ public class StatusBar extends JPanel {
         // startPulsating();
 
         this.setUpdatingBoundary(true);
+        flashAgainIfWaiting();
     }
 
     /**
@@ -880,6 +948,7 @@ public class StatusBar extends JPanel {
         }
         inputField.selectAll();
         inputField.requestFocusInWindow();
+        flashAgainIfWaiting();
     }
 
     /**
@@ -1008,6 +1077,7 @@ public class StatusBar extends JPanel {
         Instant edge = "earlier".equals(searchExtendDirection) ? searchWindowStart : clampToNow(searchWindowEnd);
         setBoundaryPromptText(stepText(edge, request.suggestedBoundary()), request.suggestedBoundary());
         updateState();
+        flashAgainIfWaiting();
     }
 
     /**
@@ -1018,6 +1088,7 @@ public class StatusBar extends JPanel {
         this.scopeConfirmText = question;
         boundaryPromptButton.setText("Yes");
         updateState();
+        flashAgainIfWaiting();
     }
 
     public boolean hasScopeConfirmPrompt() {
@@ -1066,6 +1137,7 @@ public class StatusBar extends JPanel {
                 DateTimeFormatterManager.formatRangeEndpoint(suggested, firstVisibleTimestamp, nowSource.instant()),
                 suggested);
         updateState();
+        flashAgainIfWaiting();
     }
 
     public boolean hasSearchRecentrePrompt() {
@@ -1110,17 +1182,18 @@ public class StatusBar extends JPanel {
     }
 
     /**
-     * Small FlatLaf round-rect buttons for the search chrome: a thin border and hover
-     * fill, no focus stop, and no minimum size so they stay within the status row.
+     * Small FlatLaf round-rect buttons for the search chrome: a raised surface with a thin border and hover
+     * fill, a hand cursor, no focus stop, and no minimum size so they stay within the status row.
      */
     private static void styleChromeButton(JButton button, Font font, boolean iconOnly) {
         button.setFont(font);
-        button.setBackground(DarculaColors.BACKGROUND);
+        button.setBackground(DarculaColors.BACKGROUND_PLUS);
         button.putClientProperty(FlatClientProperties.BUTTON_TYPE, FlatClientProperties.BUTTON_TYPE_ROUND_RECT);
         button.putClientProperty(FlatClientProperties.MINIMUM_WIDTH, 0);
         button.putClientProperty(FlatClientProperties.MINIMUM_HEIGHT, 0);
         button.setMargin(iconOnly ? new Insets(0, 4, 0, 4) : new Insets(0, 6, 0, 6));
         button.setFocusable(false);
+        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
     }
 
     /** Give the three text actions the same height as the icon chrome buttons beside them. */
@@ -1603,6 +1676,66 @@ public class StatusBar extends JPanel {
         viewTabs.setActive(detailsMode
                 ? ViewTabs.Tab.DETAILS
                 : bookmarksMode ? ViewTabs.Tab.BOOKMARKS : matchesMode ? ViewTabs.Tab.MATCHES : ViewTabs.Tab.LOG);
+        applyRootPaneTitleBarColor(bg);
+    }
+
+    /**
+     * Switches the status and prompt rows between the bottom {@link UiLayout#MOST} layout and the top merged-title-bar
+     * {@link UiLayout#WIN} layout.
+     */
+    public void setUiLayout(UiLayout layout) {
+        UiLayout next = layout != null ? layout : UiLayout.MOST;
+        if (this.uiLayout == next) {
+            return;
+        }
+        this.uiLayout = next;
+        boolean win = next == UiLayout.WIN;
+        winButtonsPlaceholder.setVisible(win);
+        macButtonsPlaceholder.setVisible(win);
+        applyRowBorders();
+        applyRootPaneTitleBarColor(statusRow.getBackground());
+        revalidate();
+        repaint();
+    }
+
+    public UiLayout uiLayout() {
+        return uiLayout;
+    }
+
+    Color statusRowBackground() {
+        return statusRow.getBackground();
+    }
+
+    /** The height of the status row in CSS/logical pixels for the native/FlatLaf title bar in {@link UiLayout#WIN}. */
+    int titleBarHeight() {
+        int h = statusRow.getPreferredSize().height;
+        return Math.max(24, Math.round(com.formdev.flatlaf.util.UIScale.unscale((float) h)));
+    }
+
+    private void applyRowBorders() {
+        if (uiLayout == UiLayout.WIN) {
+            statusRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G3));
+            inputRow.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G4));
+        } else {
+            statusRow.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, DarculaColors.G4),
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, DarculaColors.G3)));
+            inputRow.setBorder(null);
+        }
+    }
+
+    void applyRootPaneTitleBarColor(Color bg) {
+        JRootPane rootPane = getRootPane();
+        if (rootPane == null) {
+            return;
+        }
+        if (uiLayout == UiLayout.WIN) {
+            rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_BACKGROUND, bg);
+            rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_FOREGROUND, FOREGROUND);
+        } else {
+            rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_BACKGROUND, null);
+            rootPane.putClientProperty(FlatClientProperties.TITLE_BAR_FOREGROUND, null);
+        }
     }
 
     /** Show the scope's narrowing and excluded text terms as chips. EDT only. */
@@ -1705,8 +1838,12 @@ public class StatusBar extends JPanel {
         }
 
         this.inputState = state;
-        if (entering && state.needsInput()) {
-            inputFlash.start();
+        if (state.needsInput()) {
+            if (entering) {
+                inputFlash.startDouble(AttentionFlash.REPEAT_INTERVAL_MILLIS);
+            }
+        } else if (inputFlash.isRunning() || inputFlash.isRepeating()) {
+            inputFlash.stop();
         }
 
         // Format the prompt text: key tokens resolve against the key map, then the %s args fill in.

@@ -56,6 +56,24 @@ final class ThemeSwitch {
                 text.setSelectionColor(mapped(text.getSelectionColor(), remap));
                 text.setSelectedTextColor(mapped(text.getSelectedTextColor(), remap));
             }
+            if (jc instanceof JRootPane rootPane) {
+                if (rootPane.getClientProperty(
+                        com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_BACKGROUND) instanceof Color titleBg) {
+                    Color mappedBg = mapped(titleBg, remap);
+                    if (mappedBg != titleBg) {
+                        rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_BACKGROUND,
+                                mappedBg);
+                    }
+                }
+                if (rootPane.getClientProperty(
+                        com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_FOREGROUND) instanceof Color titleFg) {
+                    Color mappedFg = mapped(titleFg, remap);
+                    if (mappedFg != titleFg) {
+                        rootPane.putClientProperty(com.formdev.flatlaf.FlatClientProperties.TITLE_BAR_FOREGROUND,
+                                mappedFg);
+                    }
+                }
+            }
             JPopupMenu popup = jc.getComponentPopupMenu();
             if (popup != null) {
                 recolour(popup, remap);
@@ -86,7 +104,8 @@ final class ThemeSwitch {
         }
         if (border instanceof LineBorder line) {
             Color colour = mapped(line.getLineColor(), remap);
-            return colour == line.getLineColor() ? border
+            return colour == line.getLineColor()
+                    ? border
                     : new LineBorder(colour, line.getThickness(), line.getRoundedCorners());
         }
         if (border instanceof MatteBorder matte && matte.getMatteColor() != null) {
