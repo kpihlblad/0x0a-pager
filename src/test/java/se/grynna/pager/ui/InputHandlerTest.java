@@ -835,6 +835,26 @@ class InputHandlerTest {
     }
 
     @Test
+    void escClearsPinnedHighlightBeforeTheSearchGuard() throws Exception {
+        var now = new AtomicLong(0);
+        Harness harness = searchHarness(now);
+        when(harness.viewPort().clearPinnedHighlight()).thenReturn(true, false);
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0));
+        flushEdt();
+
+        verify(harness.viewPort()).clearPinnedHighlight();
+        verify(harness.viewPort(), never()).clearSearchTransient(any());
+        verify(harness.viewPort(), never()).cancelSearch();
+
+        fire(harness, KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0));
+        flushEdt();
+
+        verify(harness.viewPort(), times(1)).clearSearchTransient("Esc");
+        verify(harness.viewPort(), never()).cancelSearch();
+    }
+
+    @Test
     void escConsumedByAnEarlierStepDisarmsTheGuard() throws Exception {
         var now = new AtomicLong(0);
         Harness harness = searchHarness(now);

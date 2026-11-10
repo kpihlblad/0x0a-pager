@@ -625,6 +625,9 @@ public class StatusBar extends JPanel {
     private void inputEdited() {
         if (!programmaticInputEdit) {
             searchInputEdited = true;
+            if (searchInputActive) {
+                logViewer.updateVisibleLines();
+            }
         }
     }
 
@@ -726,9 +729,15 @@ public class StatusBar extends JPanel {
                 }
 
                 if (searchInputActive) {
+                    String term = inputField.getText();
+                    if (e.isControlDown()) {
+                        log.debug("Search input pinned as highlight: {}", term);
+                        logViewer.pinHighlightTerm(term);
+                        e.consume();
+                        return;
+                    }
                     // In search input mode, Enter submits the search. Shift-Enter
                     // searches and opens the Matches view.
-                    String term = inputField.getText();
                     boolean openMatches = e.isShiftDown();
                     log.debug("Search submitted: {} (openMatches={})", term, openMatches);
                     logViewer.executeSearch(term, openMatches);
@@ -995,6 +1004,18 @@ public class StatusBar extends JPanel {
     /** True if user is currently typing a search term */
     public boolean isSearchInputActive() {
         return searchInputActive;
+    }
+
+    /**
+     * The text the user has typed into the open search input since it opened, or empty when the
+     * input is closed or still shows its untouched pre-fill.
+     */
+    public Optional<String> liveSearchInputTerm() {
+        if (!searchInputActive || !searchInputEdited) {
+            return Optional.empty();
+        }
+        String text = inputField.getText();
+        return text == null || text.isBlank() ? Optional.empty() : Optional.of(text.strip());
     }
 
     /** True if a search has been submitted and results are navigable */

@@ -259,6 +259,8 @@ public class LogViewer extends JPanel
     private final ProvisionalMatches provisional = new ProvisionalMatches();
     /** Keeps a finished search's "no matches" / "failed" toast to one per search. */
     private final SearchNoticeGate endNotices = new SearchNoticeGate();
+    /** A secondary in-page highlight term pinned via Ctrl-Enter in the search prompt; null when none. */
+    private String pinnedHighlightTerm;
     /** The last visible-lines failure toasted; cleared by the next successful update. */
     private String lastVisibleLinesFailure;
     private SearchHit firstVisibleSearchHit;
@@ -1262,6 +1264,7 @@ public class LogViewer extends JPanel
         // Bookmarks live for the session only; the next login starts with none.
         bookmarks.clear();
         bookmarkHintShown = false;
+        pinnedHighlightTerm = null;
 
         // Cancel any running search — SearchManager owns the active Searcher
         searchUpdates.unbind();
@@ -1471,6 +1474,40 @@ public class LogViewer extends JPanel
     @Override
     public List<String> getHighlightTerms() {
         return getActiveSearchTerm().stream().toList();
+    }
+
+    @Override
+    public List<String> getEchoHighlightTerms() {
+        List<String> terms = new ArrayList<>(2);
+        if (pinnedHighlightTerm != null && !pinnedHighlightTerm.isBlank()) {
+            terms.add(pinnedHighlightTerm);
+        }
+        statusBar.liveSearchInputTerm()
+                .filter(live -> pinnedHighlightTerm == null || !live.equalsIgnoreCase(pinnedHighlightTerm))
+                .ifPresent(terms::add);
+        return terms;
+    }
+
+    @Override
+    public void pinHighlightTerm(String term) {
+        String stripped = term == null ? "" : term.strip();
+        pinnedHighlightTerm = stripped.isEmpty() ? null : stripped;
+        if (isEmptyMatchesView()) {
+            leaveEventViews();
+        }
+        setSearchInputActive(false);
+        updateVisibleLines();
+        viewPanel.requestFocusInWindow();
+    }
+
+    @Override
+    public boolean clearPinnedHighlight() {
+        if (pinnedHighlightTerm == null) {
+            return false;
+        }
+        pinnedHighlightTerm = null;
+        updateVisibleLines();
+        return true;
     }
 
     @Override
@@ -3515,6 +3552,9 @@ public class LogViewer extends JPanel
         Theme next = theme != null ? theme : Theme.DARK;
         if (DarculaColors.theme() != next) {
             ThemeSwitch.apply(next);
+            if (isInMoodMode()) {
+                updateVisibleLines();
+            }
         }
         config.setTheme(next);
     }
@@ -3836,7 +3876,11 @@ public class LogViewer extends JPanel
             closeTimePanel();
             log.debug("Entering search input mode");
         }
+        boolean wasActive = statusBar.isSearchInputActive();
         statusBar.setSearchInputActive(active);
+        if (wasActive && !active) {
+            updateVisibleLines();
+        }
     }
 
     @Override

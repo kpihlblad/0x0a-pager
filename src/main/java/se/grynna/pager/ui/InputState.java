@@ -69,7 +69,8 @@ public enum InputState {
      */
     public String hint(KeyMap keyMap) {
         String template = switch (this) {
-            case SEARCH_INPUT -> "Enter search · Shift-Enter show matches · {NEXT_MATCH}/{PREVIOUS_MATCH} next/prev";
+            case SEARCH_INPUT ->
+                "Enter search · Shift-Enter show matches · Ctrl-Enter highlight · {NEXT_MATCH}/{PREVIOUS_MATCH} next/prev";
             default -> "";
         };
         return renderTemplate(template, keyMap);

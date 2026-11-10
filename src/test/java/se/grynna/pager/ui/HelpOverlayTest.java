@@ -202,6 +202,82 @@ class HelpOverlayTest {
     }
 
     @Test
+    void lightModeRendersDaySkyWithSunCloudsAndBirds() {
+        DarculaColors.use(Theme.DARK);
+        try {
+            Mood mood = new Mood();
+            StringBuilder darkSky = new StringBuilder();
+            for (int r = -1; r >= -32; r--) {
+                darkSky.append(((LoadedLogLine) mood.getLine(r, false)).getMessage()).append('\n');
+            }
+            assertThat(darkSky.toString()).doesNotContain("♦");
+
+            DarculaColors.use(Theme.LIGHT);
+            StringBuilder lightSky = new StringBuilder();
+            for (int r = -1; r >= -32; r--) {
+                lightSky.append(((LoadedLogLine) mood.getLine(r, false)).getMessage()).append('\n');
+            }
+            String day = lightSky.toString();
+            assertThat(day).doesNotContain("♦").isNotEqualTo(darkSky.toString());
+            assertThat(day).contains("|").contains("(").contains(")")
+                    .contains(String.valueOf(se.grynna.pager.ui.stars.C64BalloonSprite.ROW_BASE_CHAR));
+
+            Mood.StyledLine dayRow = Mood.styleDaySkyLine("   -(     )-   (   ).   ~v~   --o-(_)-o--");
+            assertThat(dayRow.spans()).anySatisfy(span -> {
+                assertThat(dayRow.text().substring(span.start(), span.end())).isEqualTo("-(");
+                assertThat(span.foreground().get()).isEqualTo(DarculaColors.ORANGE);
+                assertThat(span.bold()).isTrue();
+            });
+            assertThat(dayRow.spans()).anySatisfy(span -> {
+                assertThat(dayRow.text().substring(span.start(), span.end())).isEqualTo(").");
+                assertThat(span.foreground().get()).isEqualTo(DarculaColors.COMMENT);
+                assertThat(span.bold()).isFalse();
+            });
+            assertThat(dayRow.spans()).anySatisfy(span -> {
+                assertThat(dayRow.text().substring(span.start(), span.end())).contains("v");
+                assertThat(span.foreground().get()).isEqualTo(DarculaColors.CYAN);
+                assertThat(span.bold()).isTrue();
+            });
+            assertThat(dayRow.spans()).anySatisfy(span -> {
+                assertThat(dayRow.text().substring(span.start(), span.end())).isEqualTo("--o-(_)-o--");
+                assertThat(span.foreground().get()).isEqualTo(DarculaColors.PURPLE);
+            });
+
+            BufferedImage img = new BufferedImage(320, 60, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2d = img.createGraphics();
+            try {
+                var metrics = Fontalizer.getFontMetrics(g2d);
+                int cw = metrics.charWidth('W');
+                int ch = metrics.getAscent() + metrics.getDescent();
+                LineRenderer renderer = new LineRenderer(new LoadingAnimationTimer(new JPanel(), ""), metrics,
+                        new Rectangle(0, 0, 320, 60));
+                renderer.setCharSize(new LogViewer.CharacterSize(cw, ch, metrics.getAscent(), metrics.getDescent()));
+                for (int r = 0; r < se.grynna.pager.ui.stars.C64BalloonSprite.TILE_ROWS; r++) {
+                    String msg = String.valueOf((char) (se.grynna.pager.ui.stars.C64BalloonSprite.ROW_BASE_CHAR + r));
+                    DecoratedLogLine dl = new DecoratedLogLine(new LoadedLogLine(LoadedLogLine.MsgType.RAW, "mood",
+                            -10 + r, "cb", "bkt", Instant.EPOCH, null, Instant.EPOCH, Instant.EPOCH, msg, true,
+                            Level.INFO));
+                    renderer.render(g2d, dl, null, null, 0, r * ch);
+                }
+            } finally {
+                g2d.dispose();
+            }
+            int c64Rgb = se.grynna.pager.ui.stars.C64BalloonSprite.COLOR.getRGB();
+            int matchingPixels = 0;
+            for (int y = 0; y < img.getHeight(); y++) {
+                for (int x = 0; x < img.getWidth(); x++) {
+                    if (img.getRGB(x, y) == c64Rgb) {
+                        matchingPixels++;
+                    }
+                }
+            }
+            assertThat(matchingPixels).isGreaterThan(100);
+        } finally {
+            DarculaColors.use(Theme.DARK);
+        }
+    }
+
+    @Test
     void styleSpansResolveThemeColoursDynamicallyAndRenderCleanly() {
         DarculaColors.use(Theme.DARK);
         Mood mood = new Mood(KeyMap.defaults(), Set.of(UiAction.NEXT_MATCH));

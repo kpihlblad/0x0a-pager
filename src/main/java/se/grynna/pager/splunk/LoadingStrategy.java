@@ -363,10 +363,10 @@ public class LoadingStrategy {
             DirectionLater newState = downState.checkBoundary(nowBoundary, lineNumber);
             if (newState != downState) {
                 log.info("DOWN now advanced: {} -> {}", downState, newState);
+                this.downState = newState;
                 if (newState instanceof BoundaryPrompt prompt) {
                     triggerBoundaryPromptAfter(prompt);
                 }
-                this.downState = newState;
             }
 
             DirectionLater exhausted = DirectionLater.whenNoLaterWindow(

@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0
+
+- **Search:** typing in `Ctrl-F` (`Search:`) highlights matching text on the visible page live while keeping the active search highlighted in yellow; `Ctrl-Enter` pins the typed term as an in-page highlight without replacing the active search (`Esc` clears it).
+- **Cursor mode:** `Page Up`/`Page Down` (`b`/`Space`) scroll a full page, mouse-wheel scrolling keeps the cursor on the visible page, and scrolling into a segment edge triggers preloading and boundary prompts just like page mode.
+- **Light mode:** the sky above the welcome/help screen renders a daytime scene with a sun, clouds, birds, and the Commodore 64 "Up, Up, and Away!" hot air balloon sprite.
+
 ## v1.2.0
 
 - **Scope:** a filter button beside go-to and search opens the scope panel; pressing it again closes the panel.

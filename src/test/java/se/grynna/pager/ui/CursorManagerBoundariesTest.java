@@ -281,6 +281,77 @@ class CursorManagerBoundariesTest {
         assertThat(cursor.col()).isEqualTo(15);
     }
 
+    @Test
+    void cursorModeScrollingPastBottomLineScrollsPageToThresholdAndUnfreezesAfterBoundary() throws Exception {
+        setupSegment();
+        cursorManager.updateSize(10, 80);
+
+        cursorManager.setCursorFromClick(8, 0, false);
+        cursorManager.moveCursor(1, 0, false);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(9);
+        assertThat(cursorManager.getPageStart()).isEqualTo(1);
+        verify(logProvider, never()).unfreezeAfterBoundary();
+
+        // Pushing down past the last line moves the page up toward the snap threshold
+        // while keeping the cursor on the last line, then unfreezes the after boundary.
+        for (int i = 0; i < 4; i++) {
+            cursorManager.moveCursor(1, 0, false);
+        }
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(9);
+        assertThat(cursorManager.getPageStart()).isEqualTo(5);
+        verify(logProvider, never()).unfreezeAfterBoundary();
+
+        cursorManager.moveCursor(1, 0, false);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(9);
+        assertThat(cursorManager.getPageStart()).isEqualTo(5);
+        verify(logProvider).unfreezeAfterBoundary();
+    }
+
+    @Test
+    void cursorModePageDownAndPageUpSnapAndUnfreezeLikeMouseScroll() throws Exception {
+        setupSegment();
+        cursorManager.updateSize(10, 80);
+
+        // Even when the cursor sits on the top visible row (as showCursor() or Page Up places it),
+        // a single Page Down scrolls the page to the snap threshold and unfreezes the boundary.
+        cursorManager.showCursor();
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(1);
+        cursorManager.moveCursor(10, 0, false);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(9);
+        assertThat(cursorManager.getPageStart()).isEqualTo(5);
+        verify(logProvider).unfreezeAfterBoundary();
+
+        cursorManager.moveCursor(-10, 0, false);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(0);
+        assertThat(cursorManager.getPageStart()).isEqualTo(-5);
+        cursorManager.moveCursor(-10, 0, false);
+        assertThat(cursorManager.getPageStart()).isEqualTo(-5);
+        verify(logProvider).unfreezeBeforeBoundary();
+    }
+
+    @Test
+    void cursorModePageDownScrollsFullPageWhenCursorIsAtTopOfViewport() throws Exception {
+        setupLines(0, 100, null);
+        cursorManager.updateSize(10, 80);
+
+        cursorManager.showCursor();
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(1);
+
+        cursorManager.moveCursor(10, 0, false);
+        assertThat(cursorManager.getPageStart()).isEqualTo(10);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(11);
+
+        // Mouse-wheel scrolling in cursor mode keeps the cursor on the visible page,
+        // so a subsequent Page Down continues from the new viewport.
+        cursorManager.scrollContent(30, 0);
+        assertThat(cursorManager.getPageStart()).isEqualTo(40);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(41);
+
+        cursorManager.moveCursor(10, 0, false);
+        assertThat(cursorManager.getPageStart()).isEqualTo(50);
+        assertThat(cursorManager.getCursor().orElseThrow().line).isEqualTo(51);
+    }
+
     private void setupLines(Integer beforeBoundary, Integer afterBoundary, Integer nowBoundary)
             throws TemporarySearchException, SearchException, StorageException {
 

@@ -922,7 +922,8 @@ public class InputHandler {
                 || viewPort.actionAcceptBoundaryExpansion(false) || viewPort.cancelSearchMode()
                 || viewPort.closeDetails()
                 || viewPort.backToLog()
-                || cursorManager.clearSelection();
+                || cursorManager.clearSelection()
+                || viewPort.clearPinnedHighlight();
     }
 
     /** The active search term, used to pre-fill the prompt and to gate the pager aliases. */

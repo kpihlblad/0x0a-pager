@@ -217,6 +217,37 @@ class SplunkLogDataProviderTest {
     }
 
     @Test
+    void preloadFallsBackToTheOtherEdgeWhenTheCloserEdgeIsAtABoundary() throws Exception {
+        Instant from = SearchBoundaries.MIN_MINIMUM_BOUNDARY;
+        Instant to = from.plus(5, MINUTES);
+        Event atStart = createEvent(from, "cd_start", null, "start");
+        Event later = createEvent(from.plusSeconds(45), "cd_later", null, "later");
+        AtomicInteger queries = new AtomicInteger();
+        when(splunkClient.queryEventsWithMonitoring(any(), any(), any(), any())).thenAnswer(invocation -> {
+            queries.incrementAndGet();
+            LoadDecision decision = invocation.getArgument(0);
+            return Stream.of(atStart, later).filter(event -> {
+                Instant time = Instant.parse(event.get("_time"));
+                return !time.isBefore(decision.start()) && time.isBefore(decision.end());
+            });
+        });
+
+        // Segment starts on the minimum boundary (before = 0 <= after = 0).
+        // Preload must fall back from the exhausted earlier edge to the later edge.
+        dataProvider.jump(from, from, to);
+        await().atMost(3, SECONDS)
+                .untilAsserted(() -> assertThat(getDataProviderLine(0)).isInstanceOf(LoadedLogLine.class));
+        assertThat(queries.get()).isEqualTo(1);
+
+        dataProvider.preload(0, 0);
+        await().atMost(3, SECONDS).untilAsserted(() -> {
+            assertThat(queries.get()).isEqualTo(2);
+            assertThat(getDataProviderLine(1)).isInstanceOf(LoadedLogLine.class);
+        });
+        assertThat(((LoadedLogLine) getDataProviderLine(1)).getTime()).isEqualTo(from.plusSeconds(45));
+    }
+
+    @Test
     @DisplayName("Splunk floors a sub-second earliest to the whole second; such events belong to the adjacent window")
     void preloadDropsEventsBelowSubSecondWindowStart() throws Exception {
         Instant target = testClock.instant().minus(10, MINUTES);
@@ -698,8 +729,10 @@ class SplunkLogDataProviderTest {
         dataProvider.jump(target1);
         await().atMost(3, SECONDS)
                 .untilAsserted(() -> assertThat(getDataProviderLine(0)).isInstanceOf(LoadedLogLine.class));
+        dataProvider.setNowBoundary(new Boundary(BoundaryType.NOW, searchBoundaries.getNowBoundary(), 1));
         assertThat(dataProvider.getBeforeBoundary().line()).isPresent();
         assertThat(dataProvider.getAfterBoundary().line()).isPresent();
+        assertThat(dataProvider.getNowBoundary().line()).isPresent();
 
         // Jump outside the loaded interval. While the replacement load is in flight,
         // the boundaries must not carry the old segment's line numbers
@@ -707,6 +740,7 @@ class SplunkLogDataProviderTest {
         dataProvider.jump(target2);
         assertThat(dataProvider.getBeforeBoundary().line()).isEmpty();
         assertThat(dataProvider.getAfterBoundary().line()).isEmpty();
+        assertThat(dataProvider.getNowBoundary().line()).isEmpty();
         assertThat(dataProvider.getBeforeBoundary().instant()).isEqualTo(target2.truncatedTo(ChronoUnit.DAYS));
         assertThat(dataProvider.getAfterBoundary().instant())
                 .isEqualTo(target2.truncatedTo(ChronoUnit.DAYS).plus(1, ChronoUnit.DAYS));

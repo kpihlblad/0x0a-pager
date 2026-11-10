@@ -4,8 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 import se.grynna.pager.LogStatistics;
 import se.grynna.pager.splunk.*;
 import se.grynna.pager.ui.stars.ASCIINightSkyGenerator;
+import se.grynna.pager.ui.stars.C64BalloonSprite;
 import se.grynna.pager.utils.DarculaColors;
 import se.grynna.pager.utils.SbomTransformer;
+import se.grynna.pager.utils.Theme;
 
 import java.awt.Color;
 import java.time.Clock;
@@ -66,6 +68,7 @@ public class Mood implements LogDataProvider {
     private final Instant now;
     private final long skySeed = ThreadLocalRandom.current().nextLong();
     private int skyWidth = DEFAULT_SKY_WIDTH;
+    private Theme skyTheme = DarculaColors.theme();
     private final Map<Integer, StyledLine[]> skyChunks = new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<Integer, StyledLine[]> eldest) {
@@ -261,6 +264,11 @@ public class Mood implements LogDataProvider {
 
     private synchronized StyledLine styledLine(int line) {
         if (line < 0) {
+            Theme currentTheme = DarculaColors.theme();
+            if (this.skyTheme != currentTheme) {
+                this.skyTheme = currentTheme;
+                this.skyChunks.clear();
+            }
             int chunkIndex = (-line - 1) / SKY_CHUNK_HEIGHT;
             int rowInChunk = Math.floorMod(line, SKY_CHUNK_HEIGHT);
             StyledLine[] chunk = skyChunks.computeIfAbsent(chunkIndex, this::generateSkyChunk);
@@ -556,32 +564,159 @@ public class Mood implements LogDataProvider {
     private StyledLine[] generateSkyChunk(int chunkIndex) {
         Random rng = new Random(skySeed ^ (chunkIndex * 0x9E3779B97F4A7C15L));
         boolean firstChunk = chunkIndex == 0;
+        boolean dayMode = skyTheme == Theme.LIGHT;
         double areaScale = (double) (skyWidth * SKY_CHUNK_HEIGHT) / (DEFAULT_SKY_WIDTH * SKY_CHUNK_HEIGHT);
 
-        int moons = firstChunk ? 2 : (1 + rng.nextInt(2));
-        boolean bigMoons = firstChunk || rng.nextInt(3) != 0;
-        int aliens = firstChunk ? 1 : (rng.nextInt(4) == 0 ? 1 : 0);
-        int surprises = firstChunk ? (rng.nextBoolean() ? 1 : 0) : (rng.nextInt(3) == 0 ? 1 : 0);
-        int asteroids = Math.max(2, (int) Math.round((3 + rng.nextInt(2)) * areaScale));
-        int bigStars = Math.max(3, (int) Math.round((6 + rng.nextInt(3)) * areaScale));
-        int smallStars = Math.max(40, (int) Math.round((90 + rng.nextInt(30)) * areaScale));
-
         ASCIINightSkyGenerator generator = new ASCIINightSkyGenerator(skyWidth, SKY_CHUNK_HEIGHT, rng)
-                .setMoonCount(moons)
-                .setUseBigMoons(bigMoons)
-                .setAsteroidCount(asteroids)
-                .setBigStarCount(bigStars)
-                .setSmallStarCount(smallStars)
-                .setAlienCount(aliens)
-                .setSurpriseCount(surprises)
                 .setRequireNullSurrounding(true);
+
+        if (dayMode) {
+            int suns = firstChunk ? 1 : (rng.nextInt(5) == 0 ? 1 : 0);
+            int surprises = firstChunk ? 1 : (rng.nextInt(3) == 0 ? 1 : 0);
+            int bigClouds = Math.max(2, (int) Math.round((3 + rng.nextInt(2)) * areaScale));
+            int clouds = Math.max(4, (int) Math.round((7 + rng.nextInt(4)) * areaScale));
+            int birdFlocks = Math.max(1, (int) Math.round((2 + rng.nextInt(2)) * areaScale));
+            int birds = Math.max(5, (int) Math.round((10 + rng.nextInt(6)) * areaScale));
+
+            generator.setDayMode(true)
+                    .setSunCount(suns)
+                    .setSurpriseCount(surprises)
+                    .setBigCloudCount(bigClouds)
+                    .setCloudCount(clouds)
+                    .setBirdFlockCount(birdFlocks)
+                    .setBirdCount(birds);
+        } else {
+            int moons = firstChunk ? 2 : (1 + rng.nextInt(2));
+            boolean bigMoons = firstChunk || rng.nextInt(3) != 0;
+            int aliens = firstChunk ? 1 : (rng.nextInt(4) == 0 ? 1 : 0);
+            int surprises = firstChunk ? (rng.nextBoolean() ? 1 : 0) : (rng.nextInt(3) == 0 ? 1 : 0);
+            int asteroids = Math.max(2, (int) Math.round((3 + rng.nextInt(2)) * areaScale));
+            int bigStars = Math.max(3, (int) Math.round((6 + rng.nextInt(3)) * areaScale));
+            int smallStars = Math.max(40, (int) Math.round((90 + rng.nextInt(30)) * areaScale));
+
+            generator.setMoonCount(moons)
+                    .setUseBigMoons(bigMoons)
+                    .setAsteroidCount(asteroids)
+                    .setBigStarCount(bigStars)
+                    .setSmallStarCount(smallStars)
+                    .setAlienCount(aliens)
+                    .setSurpriseCount(surprises);
+        }
 
         String[] rawLines = generator.generateSkyChunk();
         StyledLine[] styled = new StyledLine[rawLines.length];
         for (int row = 0; row < rawLines.length; row++) {
-            styled[row] = styleSkyLine(rawLines[row]);
+            styled[row] = dayMode ? styleDaySkyLine(rawLines[row]) : styleSkyLine(rawLines[row]);
         }
         return styled;
+    }
+
+    static StyledLine styleDaySkyLine(String line) {
+        if (line.isEmpty()) {
+            return StyledLine.EMPTY;
+        }
+        List<StyleSpan> spans = new ArrayList<>();
+        int idx = 0;
+        while (idx < line.length()) {
+            char ch = line.charAt(idx);
+            if (ch == ' ' || C64BalloonSprite.isRowMarker(ch)) {
+                idx++;
+                continue;
+            }
+            int start = idx;
+            Supplier<Color> color = daySkyCharColor(line, idx);
+            boolean bold = isBrightDaySkyChar(line, idx);
+            idx++;
+            while (idx < line.length() && line.charAt(idx) != ' ' && !C64BalloonSprite.isRowMarker(line.charAt(idx))) {
+                Supplier<Color> nextColor = daySkyCharColor(line, idx);
+                boolean nextBold = isBrightDaySkyChar(line, idx);
+                if (nextColor != color || nextBold != bold) {
+                    break;
+                }
+                idx++;
+            }
+            spans.add(new StyleSpan(start, idx, color, bold));
+        }
+        return new StyledLine(line, spans.isEmpty() ? List.of() : List.copyOf(spans));
+    }
+
+    private static boolean isBrightDaySkyChar(String line, int idx) {
+        return isDaySunToken(line, idx) || line.charAt(idx) == 'v' || line.charAt(idx) == '^';
+    }
+
+    private static Supplier<Color> daySkyCharColor(String line, int idx) {
+        if (isDaySunToken(line, idx)) {
+            return ORANGE;
+        }
+        if (isDaySurpriseToken(line, idx)) {
+            return PURPLE;
+        }
+        if (isDayBirdToken(line, idx)) {
+            return CYAN;
+        }
+        return COMMENT;
+    }
+
+    private static boolean isDaySunToken(String line, int idx) {
+        int start = tokenStart(line, idx);
+        int end = tokenEnd(line, idx);
+        String token = line.substring(start, end);
+        if ("|".equals(token) || "/".equals(token) || "\\".equals(token)) {
+            return true;
+        }
+        if (".".equals(token) || "'".equals(token) || "`.".equals(token) || ".'".equals(token)) {
+            int pipe = line.indexOf(" | ", Math.max(0, start - 6));
+            return pipe >= 0 && pipe <= end + 6;
+        }
+        if (".-'-. ".trim().equals(token) || "`---'".equals(token)
+                || "'.---.'".equals(token) || ".'---'.".equals(token)) {
+            return true;
+        }
+        if (".--.".equals(token) || "`--'".equals(token)) {
+            return (start >= 3 && (line.startsWith("`. ", start - 3) || line.startsWith(".' ", start - 3)))
+                    || (end + 3 <= line.length() && (line.startsWith(" .'", end) || line.startsWith(" `.", end)));
+        }
+        if ("-(".equals(token) || "--(".equals(token)) {
+            int close = line.indexOf(")-", end);
+            return close > end && close <= end + 6 && line.substring(end, close).isBlank();
+        }
+        if (token.startsWith(")-")) {
+            int open = line.lastIndexOf("-(", start);
+            return open >= 0 && start - open <= 8 && line.substring(open + 2, start).isBlank();
+        }
+        return false;
+    }
+
+    private static boolean isDaySurpriseToken(String line, int idx) {
+        int start = tokenStart(line, idx);
+        int end = tokenEnd(line, idx);
+        String token = line.substring(start, end);
+        return "[]".equals(token) || "`..'".equals(token) || "__|__".equals(token) || "--o-(_)-o--".equals(token)
+                || "/\\".equals(token) || "\\/".equals(token) || "`".equals(token);
+    }
+
+    private static boolean isDayBirdToken(String line, int idx) {
+        int start = tokenStart(line, idx);
+        int end = tokenEnd(line, idx);
+        String token = line.substring(start, end);
+        return "v".equals(token) || "~v~".equals(token) || "'^'".equals(token) || "'v'".equals(token)
+                || "\\_/".equals(token);
+    }
+
+    private static int tokenStart(String line, int idx) {
+        int start = idx;
+        while (start > 0 && line.charAt(start - 1) != ' ') {
+            start--;
+        }
+        return start;
+    }
+
+    private static int tokenEnd(String line, int idx) {
+        int end = idx;
+        while (end < line.length() && line.charAt(end) != ' ') {
+            end++;
+        }
+        return end;
     }
 
     static StyledLine styleSkyLine(String line) {

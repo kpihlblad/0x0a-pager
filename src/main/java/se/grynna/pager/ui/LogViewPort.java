@@ -224,6 +224,29 @@ public interface LogViewPort extends ScrolLockListener {
         return getActiveSearchTerm().stream().toList();
     }
 
+    /**
+     * Terms to highlight in the selection-echo style (case-insensitive): live search-input text
+     * while typing and any term pinned with Ctrl-Enter from the search prompt.
+     */
+    default java.util.List<String> getEchoHighlightTerms() {
+        return java.util.List.of();
+    }
+
+    /**
+     * Pins {@code term} as an in-page echo highlight without changing the active search, and closes
+     * the search prompt.
+     */
+    default void pinHighlightTerm(String term) {}
+
+    /**
+     * Clears any term pinned via {@link #pinHighlightTerm(String)}.
+     *
+     * @return true if a pinned highlight was cleared
+     */
+    default boolean clearPinnedHighlight() {
+        return false;
+    }
+
     boolean actionAcceptBoundaryExpansion(boolean accepted);
 
     /** G / R and the time group: open the time panel with {@code focus} focused. */

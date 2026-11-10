@@ -116,6 +116,102 @@ public class ASCIINightSkyGenerator {
             /___\\
             ♦vvv♦"""};
 
+    // Day sky objects for light mode (♦ represents non-transparent whitespace that cannot overlap)
+    private final String[] suns = {"""
+            ♦♦\\♦|♦/♦♦
+            ♦♦.-'-.♦♦
+            -(♦♦♦♦♦)-
+            ♦♦`---'♦♦
+            ♦♦/♦|♦\\♦♦""", """
+            ♦.♦\\♦|♦/♦.♦
+            ♦♦'.---.'♦♦
+            --(♦♦♦♦♦)--
+            ♦♦.'---'.♦♦
+            ♦'♦/♦|♦\\♦'♦""", """
+            ♦♦\\♦♦|♦♦/♦♦
+            `.♦.--.♦.'
+            --(♦♦♦♦)--
+            .'♦`--'♦`.
+            ♦♦/♦♦|♦♦\\♦♦"""};
+
+    private final String[] sunWithClouds = {"""
+            ♦♦\\♦|♦/♦♦♦♦♦♦♦♦♦
+            ♦♦.-'-.♦♦♦.--.♦♦
+            -(♦♦♦♦♦)-(♦♦♦♦).
+            ♦♦`---'♦(____(__)
+            ♦♦/♦|♦\\♦♦♦♦♦♦♦♦♦"""};
+
+    private final String[] bigClouds = {"""
+            ♦♦♦♦♦.-.♦♦♦♦♦♦.-.♦♦♦
+            ♦♦♦_(♦♦♦)_♦♦♦(♦♦♦)♦♦
+            ♦♦(♦♦♦♦♦♦♦)_(___(__)
+            ♦♦♦`-(_______)-'♦♦♦♦""", """
+            ♦♦♦♦♦♦♦.-~~~-.♦♦♦♦♦♦♦♦
+            ♦.-♦~♦~-(♦♦♦♦♦♦♦)_♦_♦♦
+            /♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦~♦-.
+            |♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦\\
+            ♦\\♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦♦.'
+            ♦♦♦~-♦.♦___________♦.-~""", """
+            ♦♦♦♦♦♦_♦♦♦♦♦♦♦♦♦♦♦♦
+            ♦♦♦♦(`♦♦).♦♦♦♦♦♦_♦♦
+            ♦♦♦(♦♦♦♦♦).♦♦.:(`♦)`.
+            ♦♦_(♦♦♦♦♦♦♦'`.(♦♦♦.♦♦)
+            ♦(♦(____.:'-'♦`-(____)""", """
+            ♦♦♦♦.--.♦♦♦♦♦♦.-.♦♦♦
+            ♦.-(♦♦♦♦)-.♦♦(♦♦♦).♦
+            (♦♦♦♦♦♦♦♦♦♦)_(_____)
+            ♦`-(___________)-'♦♦"""};
+
+    private final String[] clouds = {"""
+            ♦.--.♦
+            (♦♦♦♦)
+            ♦'--'♦""", """
+            ♦♦.-.♦♦♦
+            ♦(♦♦♦).♦
+            (__(__)♦""", """
+            ♦♦_♦♦_♦♦
+            ♦(♦)_(♦)_
+            (_♦♦_♦♦_)
+            ♦♦(_)♦(__)""", """
+            ♦♦♦.--.♦♦♦
+            .-(♦♦♦♦)-.
+            (___.__)__)""", """
+            ♦♦.-.♦♦♦♦
+            ♦(♦♦♦)♦_♦
+            (_____(♦)""", """
+            ♦♦.--.♦♦♦
+            ♦(♦♦♦♦).♦
+            (____(__)""", """
+            ♦♦♦_♦♦♦♦♦
+            ♦(`♦).♦♦♦
+            (♦♦♦♦♦).♦
+            ♦`♦__.:'♦"""};
+
+    private final String[] birdFlocks = {"""
+            ♦♦v♦♦v♦
+            v♦♦♦v♦♦""", """
+            ♦~v~♦♦♦
+            ♦♦♦♦~v~""", """
+            '^'♦♦'^'
+            ♦♦'^'♦♦♦""", """
+            \\♦/♦♦\\♦/
+            ♦v♦♦♦♦v♦"""};
+
+    private final String[] birds = {"v", "~v~", "'^'", "\\_/", "v", "'v'"};
+    private final double[] birdProbabilities = {0.35, 0.20, 0.15, 0.10, 0.10, 0.10};
+
+    /**
+     * Multi-line placement template for the 24x21 Commodore 64 "Up, Up, and Away!" hot air
+     * balloon sprite (3 text rows by 6 columns, painted pixel-by-pixel by {@code LineRenderer}).
+     */
+    public static final String C64_BALLOON_SPRITE = C64BalloonSprite.skyObjectTemplate();
+
+    private final String[] c64Balloons = {C64_BALLOON_SPRITE};
+
+    private final String[] daySurprises = {C64_BALLOON_SPRITE, """
+            ♦♦__|__♦♦
+            --o-(_)-o--"""};
+
     // Configuration options
     private int moonCount = 1;
     private int asteroidCount = 3;
@@ -123,6 +219,12 @@ public class ASCIINightSkyGenerator {
     private int smallStarCount = 80;
     private int alienCount = 0; // Aliens are rare, default to 0
     private int surpriseCount = 0;
+    private int sunCount = 0;
+    private int bigCloudCount = 4;
+    private int cloudCount = 8;
+    private int birdFlockCount = 2;
+    private int birdCount = 12;
+    private boolean dayMode = false;
     private boolean requireNullSurrounding = true;
     private boolean useBigMoons = false;
 
@@ -193,14 +295,17 @@ public class ASCIINightSkyGenerator {
      * Check if a position has null surrounding cells (for small star spacing).
      */
     private boolean hasNullSurrounding(int x, int y) {
-        int[][] offsets = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}};
-
-        for (int[] offset : offsets) {
-            int nx = x + offset[0];
-            int ny = y + offset[1];
-
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height && skyMatrix[ny][nx] != null) {
-                return false;
+        int hRadius = dayMode ? 3 : 1;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -hRadius; dx <= hRadius; dx++) {
+                if (dx == 0 && dy == 0) {
+                    continue;
+                }
+                int nx = x + dx;
+                int ny = y + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height && skyMatrix[ny][nx] != null) {
+                    return false;
+                }
             }
         }
         return true;
@@ -284,6 +389,10 @@ public class ASCIINightSkyGenerator {
      * Fill the sky with various celestial objects.
      */
     private void fillSky() {
+        if (dayMode) {
+            fillDaySky();
+            return;
+        }
         // Place larger objects first to avoid blocking
         if (useBigMoons && moonCount > 0) {
             if (moonCount == 1) {
@@ -308,6 +417,41 @@ public class ASCIINightSkyGenerator {
 
         // Fill remaining null positions with spaces
         fillNullWithWhitespace();
+    }
+
+    private void fillDaySky() {
+        if (sunCount > 0) {
+            placeFromArray(random.nextInt(3) == 0 ? sunWithClouds : suns, 1);
+        }
+        if (surpriseCount > 0) {
+            placeFromArray(c64Balloons, 1);
+            if (surpriseCount > 1) {
+                placeFromArray(daySurprises, surpriseCount - 1);
+            }
+        }
+        placeFromArray(bigClouds, bigCloudCount);
+        placeFromArray(clouds, cloudCount);
+        placeFromArray(birdFlocks, birdFlockCount);
+        placeBirds(birdCount);
+        fillNullWithWhitespace();
+    }
+
+    private void placeBirds(int count) {
+        for (int i = 0; i < count; i++) {
+            placeObject(getRandomBird());
+        }
+    }
+
+    private String getRandomBird() {
+        double rand = random.nextDouble();
+        double cumulative = 0.0;
+        for (int i = 0; i < birds.length; i++) {
+            cumulative += birdProbabilities[i];
+            if (rand < cumulative) {
+                return birds[i];
+            }
+        }
+        return birds[birds.length - 1];
     }
 
     /**
@@ -405,6 +549,54 @@ public class ASCIINightSkyGenerator {
      */
     public ASCIINightSkyGenerator setSurpriseCount(int count) {
         this.surpriseCount = Math.max(0, Math.min(20, count));
+        return this;
+    }
+
+    /**
+     * Set whether to generate a daytime sky (sun, clouds, birds) instead of a night sky.
+     */
+    public ASCIINightSkyGenerator setDayMode(boolean dayMode) {
+        this.dayMode = dayMode;
+        return this;
+    }
+
+    /**
+     * Set the number of suns to generate in day mode (0-1: at most one sun per chunk).
+     */
+    public ASCIINightSkyGenerator setSunCount(int count) {
+        this.sunCount = Math.max(0, Math.min(1, count));
+        return this;
+    }
+
+    /**
+     * Set the number of large multi-bump clouds to generate in day mode (0-50).
+     */
+    public ASCIINightSkyGenerator setBigCloudCount(int count) {
+        this.bigCloudCount = Math.max(0, Math.min(50, count));
+        return this;
+    }
+
+    /**
+     * Set the number of small/medium clouds to generate in day mode (0-100).
+     */
+    public ASCIINightSkyGenerator setCloudCount(int count) {
+        this.cloudCount = Math.max(0, Math.min(100, count));
+        return this;
+    }
+
+    /**
+     * Set the number of bird flocks to generate in day mode (0-50).
+     */
+    public ASCIINightSkyGenerator setBirdFlockCount(int count) {
+        this.birdFlockCount = Math.max(0, Math.min(50, count));
+        return this;
+    }
+
+    /**
+     * Set the number of solitary birds to generate in day mode (0-200).
+     */
+    public ASCIINightSkyGenerator setBirdCount(int count) {
+        this.birdCount = Math.max(0, Math.min(200, count));
         return this;
     }
 

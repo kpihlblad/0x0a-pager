@@ -248,6 +248,15 @@ public class CursorManager {
                 if (deltaLines < 0 && LIMIT_TOP_LINE - deltaLines >= pageStart) return;
                 if (deltaLines > 0 && LIMIT_BOTTOM_LINE - deltaLines <= pageStart) return;
                 pageStart += snapToBoundary(deltaLines);
+                if (!scrollLock && cursor != null && mark == null && linesPerPage > 0) {
+                    long minVisible = Math.max(topLine(), lineFromVisible(min(1, maxScreenRow())));
+                    long maxVisible = Math.min(bottomLine(),
+                            Math.max(lineFromVisible(0), (pageStart + linesPerPage) - 2));
+                    if (minVisible <= maxVisible && (cursor.line < minVisible || cursor.line > maxVisible)) {
+                        cursor.clampLine(maxVisible, minVisible);
+                        cursor.clampCol(maxCol());
+                    }
+                }
             }
             log.trace("scroll toplineonpage {} to {}", deltaLines, pageStart);
         }
@@ -325,18 +334,28 @@ public class CursorManager {
             // Move cursor: clamp the row first, so the column is measured on the
             // row the cursor actually ends up on (not a boundary row past the edge).
             cursor.deltaLine(deltaLines);
-            if (logProvider instanceof MatchesDataProvider) {
-                if (deltaLines > 0 && cursor.line > bottomLine()) logProvider.unfreezeAfterBoundary();
-                if (deltaLines < 0 && cursor.line < topLine()) logProvider.unfreezeBeforeBoundary();
-            }
+            int unclampedLine = cursor.line;
             cursor.clampLine(bottomLine(), topLine());
+            long overshoot = (long) unclampedLine - cursor.line;
             int maxCol = maxCol();
             cursor.deltaCol(deltaCols);
 
             cursor.clampCol(maxCol);
 
-            // scroll (move) topline if cursor is outside the viewport
-            scrollToCursor();
+            // scroll (move) topline if cursor is outside the viewport or pushed past a boundary
+            if (linesPerPage > 0 && (deltaLines >= linesPerPage || deltaLines <= -linesPerPage)) {
+                if (!(deltaLines < 0 && LIMIT_TOP_LINE - deltaLines >= pageStart)
+                        && !(deltaLines > 0 && LIMIT_BOTTOM_LINE - deltaLines <= pageStart)) {
+                    pageStart += snapToBoundary(deltaLines);
+                }
+                if (cursor.line < pageStart || cursor.line >= pageStart + linesPerPage) {
+                    scrollToCursor(0);
+                } else {
+                    scrollToCursorCols();
+                }
+            } else {
+                scrollToCursor(overshoot);
+            }
         }
         if (!extendSelection && scrollLock) {
             setScrollLock(true);
@@ -627,15 +646,25 @@ public class CursorManager {
     }
 
     private void scrollToCursor() throws TemporarySearchException, SearchException, StorageException {
+        scrollToCursor(0);
+    }
+
+    private void scrollToCursor(long overshoot) throws TemporarySearchException, SearchException, StorageException {
         var minCursorLine = lineFromVisible(1);
         var maxCursorLine = (pageStart + linesPerPage) - 2;
 
-        int scrollDelta = 0;
-        if (cursor.line < minCursorLine) {
-            scrollDelta = cursor.line - minCursorLine;
+        long scrollDelta = 0;
+        if (overshoot > 0) {
+            scrollDelta = Math.max(0L, (long) cursor.line - maxCursorLine) + overshoot;
+        } else if (overshoot < 0) {
+            scrollDelta = Math.min(0L, (long) cursor.line - minCursorLine) + overshoot;
+        } else if (cursor.line < minCursorLine) {
+            scrollDelta = (long) cursor.line - minCursorLine;
         } else if (cursor.line > maxCursorLine) {
-            scrollDelta = cursor.line - maxCursorLine;
+            scrollDelta = (long) cursor.line - maxCursorLine;
         }
+
+        int clampedDelta = Math.clamp(scrollDelta, LIMIT_TOP_LINE, LIMIT_BOTTOM_LINE);
 
         log.trace("""
                 scollCursorIntoView
@@ -644,15 +673,21 @@ public class CursorManager {
                    cursor.line {}
                    minCursorLine {}
                    maxCursorLine {}
-                   scrollDelta {}""", linesPerPage, pageStart, cursor.line, minCursorLine, maxCursorLine, scrollDelta);
+                   scrollDelta {}""", linesPerPage, pageStart, cursor.line, minCursorLine, maxCursorLine, clampedDelta);
 
-        if (scrollDelta != 0) {
-            pageStart += snapToBoundary(scrollDelta);
+        if (clampedDelta != 0
+                && !(clampedDelta < 0 && LIMIT_TOP_LINE - clampedDelta >= pageStart)
+                && !(clampedDelta > 0 && LIMIT_BOTTOM_LINE - clampedDelta <= pageStart)) {
+            pageStart += snapToBoundary(clampedDelta);
 
-            log.trace("cursor moved toplineonpage by {} to {}", scrollDelta, pageStart);
+            log.trace("cursor moved toplineonpage by {} to {}", clampedDelta, pageStart);
             viewPort.updateVisibleLines();
         }
 
+        scrollToCursorCols();
+    }
+
+    private void scrollToCursorCols() {
         // scroll (move) leftOfPage if cursor is outside the viewport
         int rightLimit = leftOfPage + charsPerLine - 3;
         int leftLimit = leftOfPage + 3;
@@ -767,6 +802,7 @@ public class CursorManager {
     private void spawnCursorIfNotPresent() {
         if (cursor == null) {
             cursor = new Cursor(lineFromVisible(indexAtHalf(linesPerPage)), 0);
+            cursor.clampLine(bottomLine(), topLine());
         }
     }
 
@@ -1050,6 +1086,10 @@ public class CursorManager {
                 }
             }
         }
+
+        // In-page echo highlights: live text being typed in the search prompt and any term pinned with Ctrl-Enter.
+        viewPort.getEchoHighlightTerms().stream().filter(term -> !term.isBlank()).forEach(
+                term -> highlights.add(new TextHighlight(term, DarculaColors.SELECTION_ECHO, null, false)));
 
         // Search term and narrowed scope terms — case-insensitive, because Splunk search is too.
         viewPort.getHighlightTerms().stream().filter(term -> !term.isBlank()).forEach(

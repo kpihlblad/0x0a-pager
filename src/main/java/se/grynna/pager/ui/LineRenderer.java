@@ -6,6 +6,7 @@ import se.grynna.pager.splunk.LoadedLogLine.MsgType;
 import se.grynna.pager.ui.preferences.DateTimeFormatterManager;
 import se.grynna.pager.ui.sprattel.Blockies;
 import se.grynna.pager.ui.sprattel.LoadingAnimationTimer;
+import se.grynna.pager.ui.stars.C64BalloonSprite;
 import se.grynna.pager.utils.DarculaColors;
 
 import java.awt.*;
@@ -239,7 +240,8 @@ public class LineRenderer {
                 // calculate
 
                 var areaLength = 1 + (renderArea.width - iconSpaceWidth) / charSize.width();
-                var text = rightPad(truncate(line.formattedLine(), horizontalScroll, MAXLINE_LENGTH), areaLength);
+                var rawText = rightPad(truncate(line.formattedLine(), horizontalScroll, MAXLINE_LENGTH), areaLength);
+                var text = C64BalloonSprite.stripRowMarkers(rawText);
                 var preambleEnd = max(0, line.getPreambleEnd() - horizontalScroll);
 
                 var display = new AttributedString(text);
@@ -323,6 +325,9 @@ public class LineRenderer {
                 }
 
                 g2d.drawString(display.getIterator(), textStartX, y + charSize.ascent());
+                if (rawText != text) {
+                    C64BalloonSprite.paintLineSlices(g2d, rawText, textStartX, y, charSize.width(), charSize.height());
+                }
 
                 // paint caret
                 var caretX = (line.getCursorPosition() - horizontalScroll);

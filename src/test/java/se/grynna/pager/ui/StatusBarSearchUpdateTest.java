@@ -18,12 +18,13 @@ import static org.mockito.Mockito.when;
 class StatusBarSearchUpdateTest {
 
     private static final Instant T = Instant.parse("2017-03-30T10:00:00Z");
+    private LogViewer viewer;
     private StatusBar statusBar;
 
     @BeforeEach
     void setUp() throws Exception {
         DateTimeFormatterManagerTestUtil.initDTM();
-        LogViewer viewer = mock(LogViewer.class);
+        viewer = mock(LogViewer.class);
         when(viewer.getActionMap()).thenReturn(new ActionMap());
         when(viewer.getState()).thenReturn(InputState.SCROLL);
         onEdt(() -> {
@@ -134,5 +135,27 @@ class StatusBarSearchUpdateTest {
             assertThat(statusBar.searchCenterText())
                     .isEqualTo(time(T.minusSeconds(60)) + " \u2192 " + time(T.plusSeconds(120)));
         });
+    }
+
+    @Test
+    void typingInSearchInputReportsLiveEchoTermAndCtrlEnterPinsHighlightWithoutStartingSearch() throws Exception {
+        onEdt(() -> {
+            statusBar.setSearchInputActive(true);
+            statusBar.prefillSearchInput("timeout");
+            assertThat(statusBar.liveSearchInputTerm()).isEmpty();
+
+            statusBar.inputField().setText("  secondWord  ");
+            assertThat(statusBar.liveSearchInputTerm()).contains("secondWord");
+
+            java.awt.event.KeyEvent ctrlEnter = new java.awt.event.KeyEvent(statusBar.inputField(),
+                    java.awt.event.KeyEvent.KEY_PRESSED, System.currentTimeMillis(),
+                    java.awt.event.InputEvent.CTRL_DOWN_MASK, java.awt.event.KeyEvent.VK_ENTER, '\n');
+            for (var listener : statusBar.inputField().getKeyListeners()) {
+                listener.keyPressed(ctrlEnter);
+            }
+        });
+        org.mockito.Mockito.verify(viewer).pinHighlightTerm("  secondWord  ");
+        org.mockito.Mockito.verify(viewer, org.mockito.Mockito.never()).executeSearch(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.anyBoolean());
     }
 }

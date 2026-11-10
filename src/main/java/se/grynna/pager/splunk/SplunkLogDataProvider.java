@@ -423,21 +423,29 @@ public class SplunkLogDataProvider implements LogDataProvider {
             if (lastVisible < currentSegment.getStartLine() || firstVisible >= currentSegment.getEndLineExl()) {
                 return;
             }
-            int before = Math.max(0, firstVisible - currentSegment.getStartLine());
-            int after = Math.max(0, currentSegment.getEndLineExl() - 1 - lastVisible);
+            int before = firstVisible - currentSegment.getStartLine();
+            int after = currentSegment.getEndLineExl() - 1 - lastVisible;
             boolean up = before < PRELOAD_EARLIER_DISTANCE_LINES;
             boolean down = after < PRELOAD_LATER_DISTANCE_LINES;
             if (!up && !down) {
                 return;
             }
-            // Prefer the closer edge; a later repaint can fill the other side.
+            // Prefer the closer edge; if that edge is already at a boundary, try the other side.
             boolean earlier = up && (!down || before <= after);
-            int target = earlier ? currentSegment.getStartLine() - 1 : currentSegment.getEndLineExl();
-            LoadDecision decision = loadingStrategy.evaluateLineRequest(target, currentSegment, false);
-            if (decision.shouldLoad()) {
-                scheduleLoad(new LoadJob(currentSegment, decision, target, "preload near " + target));
+            if (!tryPreload(earlier) && (earlier ? down : up)) {
+                tryPreload(!earlier);
             }
         }
+    }
+
+    private boolean tryPreload(boolean earlier) {
+        int target = earlier ? currentSegment.getStartLine() - 1 : currentSegment.getEndLineExl();
+        LoadDecision decision = loadingStrategy.evaluateLineRequest(target, currentSegment, false);
+        if (decision.shouldLoad()) {
+            scheduleLoad(new LoadJob(currentSegment, decision, target, "preload near " + target));
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -568,6 +576,12 @@ public class SplunkLogDataProvider implements LogDataProvider {
     @Override
     public Boundary getBeforeBoundary() {
         synchronized (lock) {
+            Instant min = searchBoundaries.getMinBoundary();
+            if (beforeBoundary != null && min != null && !beforeBoundary.instant().equals(min)) {
+                beforeBoundary = beforeBoundary.line().isPresent()
+                        ? new Boundary(BEFORE, min, beforeBoundary.line().get())
+                        : new Boundary(BEFORE, min);
+            }
             return beforeBoundary;
         }
     }
@@ -588,6 +602,12 @@ public class SplunkLogDataProvider implements LogDataProvider {
     @Override
     public Boundary getAfterBoundary() {
         synchronized (lock) {
+            Instant max = searchBoundaries.getMaxBoundary();
+            if (afterBoundary != null && max != null && !afterBoundary.instant().equals(max)) {
+                afterBoundary = afterBoundary.line().isPresent()
+                        ? new Boundary(AFTER, max, afterBoundary.line().get())
+                        : new Boundary(AFTER, max);
+            }
             return afterBoundary;
         }
     }
@@ -924,6 +944,7 @@ public class SplunkLogDataProvider implements LogDataProvider {
 
             setAfterBoundary(to);
             setBeforeBoundary(from);
+            nowBoundary = new Boundary(NOW, searchBoundaries.getNowBoundary());
 
             var segment = new LogSegment(target);
             // The first query may be truncated and retried via load(); the retry
@@ -979,6 +1000,11 @@ public class SplunkLogDataProvider implements LogDataProvider {
             // Update afterBoundary: if segment ends at the boundary, include last line
             if (afterTime != null) {
                 afterBoundary = new Boundary(AFTER, afterTime, segment.getEndLineExl());
+            }
+
+            if (nowBoundary != null && nowBoundary.line().isPresent()
+                    && nowBoundary.line().get() < segment.getEndLineExl()) {
+                nowBoundary = new Boundary(NOW, searchBoundaries.getNowBoundary());
             }
 
             log.debug("Boundaries: {}, {}, {}", beforeBoundary, afterBoundary, getNowBoundary());

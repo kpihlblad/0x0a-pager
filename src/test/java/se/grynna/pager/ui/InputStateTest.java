@@ -77,6 +77,7 @@ class InputStateTest {
         KeyMap pager = desktop.withFlavour(KeyFlavour.PAGER);
 
         assertThat(InputState.SEARCH_INPUT.hint(desktop)).startsWith("Enter search · ")
+                .contains("Ctrl-Enter highlight")
                 .contains("F3/Shift-F3 next/prev");
         assertThat(InputState.SEARCH_INPUT.hint(pager)).contains("n/N next/prev");
         assertThat(InputState.SCROLL.text(pager)).contains("n next match").contains("/ to search")
